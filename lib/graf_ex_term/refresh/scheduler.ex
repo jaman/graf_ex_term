@@ -127,12 +127,21 @@ defmodule GrafExTerm.Refresh.Scheduler do
   defp instant_table_panel?(_), do: false
 
   defp fetch_range_series(panel, vars, app_datasources, stored_datasource_map, from, to, step) do
+    overrides = get_in(panel.field_config, ["overrides"]) || []
+
     results =
       panel.targets
       |> Enum.map(fn target ->
         expr = Substitution.substitute(target.expr, vars)
         config = resolve_datasource(target.datasource_ref, vars, app_datasources, stored_datasource_map)
-        Prometheus.query(config, expr, {from, to}, step)
+
+        case Prometheus.query(config, expr, {from, to}, step) do
+          {:ok, series} ->
+            named = Enum.map(series, fn s -> Map.put(s, :name, format_series_name(target.legend_format, s.labels)) end)
+            {:ok, apply_series_overrides(named, overrides)}
+          error ->
+            error
+        end
       end)
 
     successful = Enum.filter(results, fn
@@ -146,6 +155,61 @@ defmodule GrafExTerm.Refresh.Scheduler do
       all_series = Enum.flat_map(successful, fn {:ok, series} -> series end)
       {:ok, all_series}
     end
+  end
+
+  defp format_series_name("", labels) do
+    labels
+    |> Map.delete("__name__")
+    |> Map.delete("instance")
+    |> Map.delete("job")
+    |> Map.values()
+    |> case do
+      [] -> Map.get(labels, "__name__", "")
+      values -> Enum.join(values, ", ")
+    end
+  end
+
+  defp format_series_name(fmt, labels) do
+    Regex.replace(~r/\{\{(\w+)\}\}/, fmt, fn _, key -> Map.get(labels, key, "") end)
+  end
+
+  defp apply_series_overrides(series, overrides) do
+    negative_matchers = Enum.flat_map(overrides, fn override ->
+      has_negative_y = Enum.any?(override["properties"] || [], fn p ->
+        p["id"] == "custom.transform" and p["value"] == "negative-Y"
+      end)
+
+      if has_negative_y do
+        case get_in(override, ["matcher", "id"]) do
+          "byName" -> [{:exact, get_in(override, ["matcher", "options"])}]
+          "byRegexp" ->
+            pattern = get_in(override, ["matcher", "options"])
+            [{:regex, Regex.compile!(String.slice(pattern, 1..-2//1))}]
+          _ -> []
+        end
+      else
+        []
+      end
+    end)
+
+    if Enum.empty?(negative_matchers) do
+      series
+    else
+      Enum.map(series, fn s ->
+        if matches_any?(s.name, negative_matchers) do
+          %{s | values: Enum.map(s.values, fn {ts, v} -> {ts, -v} end)}
+        else
+          s
+        end
+      end)
+    end
+  end
+
+  defp matches_any?(name, matchers) do
+    Enum.any?(matchers, fn
+      {:exact, n} -> name == n
+      {:regex, r} -> Regex.match?(r, name)
+    end)
   end
 
   defp fetch_instant_table(panel, vars, app_datasources, stored_datasource_map) do

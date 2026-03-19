@@ -25,7 +25,9 @@ defmodule GrafExTerm.Screen.Viewer do
       loading: true,
       data_version: nil,
       column_visibility: %{},
-      collapsed_rows: MapSet.new()
+      collapsed_rows: MapSet.new(),
+      collapsed_table_panels: MapSet.new(),
+      all_tables_collapsed: false
     }
   end
 
@@ -55,11 +57,12 @@ defmodule GrafExTerm.Screen.Viewer do
       if state.loading do
         [loading_indicator(running: true)]
       else
-        [GridMapper.to_tui_layout(state.dashboard.panels, state.prepared_panel_data, state.variables, state.column_visibility, state.collapsed_rows)]
+        [GridMapper.to_tui_layout(state.dashboard.panels, state.prepared_panel_data, state.variables, state.column_visibility, state.collapsed_rows, %{}, state.collapsed_table_panels, state.all_tables_collapsed)]
       end
 
     vertical([
       header("graf_ex_term  ▸  #{state.dashboard.title}"),
+      checkbox("Collapse all tables", id: :collapse_all_tables, checked: state.all_tables_collapsed, on_change: :toggle_all_tables),
       scrollable(content, flex: 1),
       footer(
         bindings: [
@@ -80,6 +83,18 @@ defmodule GrafExTerm.Screen.Viewer do
     current = current_column_set(state, panel_id)
     new_set = if checked, do: MapSet.put(current, col_key), else: MapSet.delete(current, col_key)
     {:noreply, %{state | column_visibility: Map.put(state.column_visibility, panel_id, new_set)}}
+  end
+
+  def handle_event(:toggle_all_tables, checked, state) do
+    {:noreply, %{state | all_tables_collapsed: checked, collapsed_table_panels: MapSet.new()}}
+  end
+
+  def handle_event({:toggle_table_panel, panel_id}, collapsed, state) do
+    new_set =
+      if collapsed,
+        do: MapSet.put(state.collapsed_table_panels, panel_id),
+        else: MapSet.delete(state.collapsed_table_panels, panel_id)
+    {:noreply, %{state | collapsed_table_panels: new_set}}
   end
 
   def handle_event({:toggle_row, row_id}, collapsed, state) do

@@ -3,14 +3,13 @@ defmodule GrafExTerm.Layout.GridMapper do
 
   alias GrafExTerm.Panel.{Renderer, Row}
 
-  def to_tui_layout(panels, panel_data, _variables \\ %{}, column_visibility \\ %{}, collapsed_rows \\ MapSet.new(), table_layouts \\ %{}) do
+  def to_tui_layout(panels, panel_data, _variables \\ %{}, column_visibility \\ %{}, collapsed_rows \\ MapSet.new(), table_layouts \\ %{}, collapsed_table_panels \\ MapSet.new(), all_tables_collapsed \\ false) do
     height_ratio = Application.get_env(:graf_ex_term, :height_ratio, 3)
 
     panels
-    |> Enum.sort_by(fn p -> {p.grid_pos.y, p.grid_pos.x} end)
     |> group_by_row_section()
     |> Enum.flat_map(fn section ->
-      build_section_widgets(section, panel_data, height_ratio, column_visibility, collapsed_rows, table_layouts)
+      build_section_widgets(section, panel_data, height_ratio, column_visibility, collapsed_rows, table_layouts, collapsed_table_panels, all_tables_collapsed)
     end)
   end
 
@@ -28,24 +27,24 @@ defmodule GrafExTerm.Layout.GridMapper do
     sections ++ [{current_row, current_panels}]
   end
 
-  defp build_section_widgets({nil, panels}, panel_data, height_ratio, column_visibility, _collapsed_rows, table_layouts) do
-    build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts)
+  defp build_section_widgets({nil, panels}, panel_data, height_ratio, column_visibility, _collapsed_rows, table_layouts, collapsed_table_panels, all_tables_collapsed) do
+    build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed)
   end
 
-  defp build_section_widgets({row_panel, panels}, panel_data, height_ratio, column_visibility, collapsed_rows, table_layouts) do
+  defp build_section_widgets({row_panel, panels}, panel_data, height_ratio, column_visibility, collapsed_rows, table_layouts, collapsed_table_panels, all_tables_collapsed) do
     collapsed = MapSet.member?(collapsed_rows, row_panel.id)
-    row_widget = Row.render(row_panel, collapsed)
+    row_widget = Row.render(row_panel, collapsed, length(panels))
 
     if collapsed do
       [row_widget]
     else
-      [row_widget | build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts)]
+      [row_widget | build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed)]
     end
   end
 
-  defp build_panel_row_widgets([], _panel_data, _height_ratio, _column_visibility, _table_layouts), do: []
+  defp build_panel_row_widgets([], _panel_data, _height_ratio, _column_visibility, _table_layouts, _collapsed_table_panels, _all_tables_collapsed), do: []
 
-  defp build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts) do
+  defp build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed) do
     panels
     |> Enum.sort_by(fn p -> p.grid_pos.x end)
     |> Enum.group_by(fn p -> p.grid_pos.y end)
@@ -60,7 +59,8 @@ defmodule GrafExTerm.Layout.GridMapper do
       widgets =
         Enum.map(row_panels, fn panel ->
           data = Map.get(panel_data, panel.id, {:error, :no_data})
-          widget = Renderer.render(panel, data, column_visibility, table_layouts)
+          table_expanded = not (all_tables_collapsed or MapSet.member?(collapsed_table_panels, panel.id))
+          widget = Renderer.render(panel, data, column_visibility, table_layouts, table_expanded)
           vertical([widget], colspan: panel.grid_pos.w)
         end)
 

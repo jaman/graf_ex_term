@@ -9,7 +9,10 @@ defmodule GrafExTerm.Panel.Bargauge do
       |> Enum.take(height)
       |> Enum.map(fn s ->
         value = last_value(s.values)
-        series_label = s.labels |> Map.values() |> Enum.join(", ")
+        series_label = case Map.get(s, :name) do
+          name when is_binary(name) and name != "" -> name
+          _ -> s.labels |> Map.values() |> Enum.join(", ")
+        end
 
         horizontal([
           label(series_label),

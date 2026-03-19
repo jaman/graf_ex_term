@@ -16,10 +16,13 @@ defmodule GrafExTerm.Panel.Timeseries do
     values = series_to_values(series)
     type = chart_type(panel)
 
+    area_fill = if type == :area and Application.get_env(:graf_ex_term, :invert_area_charts, true), do: :inverted, else: :below
+
     opts =
       [
         id: :"chart_#{panel.id}",
         chart_type: type,
+        area_fill: area_fill,
         show_axes: true,
         title: panel.title,
         colors: @palette,
