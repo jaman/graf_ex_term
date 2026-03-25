@@ -30,7 +30,7 @@ defmodule GrafExTerm.MixProject do
 
   defp deps do
     [
-      {:drafter, path: "../drafter"},
+      {:drafter, github: "jaman/drafter"},
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:phoenix_pubsub, "~> 2.1"},
