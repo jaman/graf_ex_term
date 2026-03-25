@@ -14,7 +14,6 @@ defmodule GrafExTerm.Panel.Timeseries do
     { 80,  90, 130}
   ]
 
-  @max_data_points 2000
 
   def render(panel, {:ok, series}, height) do
     unit = get_in(panel.field_config, ["defaults", "unit"]) || ""
@@ -133,25 +132,7 @@ defmodule GrafExTerm.Panel.Timeseries do
 
   defp series_to_values(series) do
     Enum.map(series, fn s ->
-      s.values
-      |> Enum.map(fn {_ts, val} -> val end)
-      |> m4_downsample(@max_data_points)
+      Enum.map(s.values, fn {_ts, val} -> val end)
     end)
-  end
-
-  defp m4_downsample(values, max_points) when length(values) <= max_points, do: values
-
-  defp m4_downsample(values, max_points) do
-    n = length(values)
-    bucket_count = div(max_points, 2)
-    bucket_size = n / bucket_count
-
-    for i <- 0..(bucket_count - 1) do
-      start_idx = round(i * bucket_size)
-      end_idx = round((i + 1) * bucket_size)
-      bucket = Enum.slice(values, start_idx, max(1, end_idx - start_idx))
-      {Enum.min(bucket), Enum.max(bucket)}
-    end
-    |> Enum.flat_map(fn {mn, mx} -> [mn, mx] end)
   end
 end
