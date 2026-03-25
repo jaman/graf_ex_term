@@ -112,7 +112,7 @@ defmodule GrafExTerm.Layout.GridMapper do
             vertical([widget], colspan: panel.grid_pos.w)
           end)
 
-        {horizontal(widgets, gap: 1, height: row_height), row_height}
+        {horizontal(widgets, gap: 1), row_height}
       end)
 
     {Enum.map(rows, &elem(&1, 0)), rows |> Enum.map(&elem(&1, 1)) |> Enum.sum()}
