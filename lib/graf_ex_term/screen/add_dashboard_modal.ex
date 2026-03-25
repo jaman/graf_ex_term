@@ -115,7 +115,7 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
       uri ->
         case Store.add(uri) do
           {:ok, %{datasource_vars: [], uid: _uid}} ->
-            send(:tui_app_loop, {:app_event, :refresh_dashboards, nil})
+            Drafter.AppRegistry.send_to_loop({:app_event, :refresh_dashboards, nil})
             {:pop, :done}
 
           {:ok, %{datasource_vars: vars, uid: uid}} ->
@@ -133,12 +133,12 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
 
   def handle_event(:save_datasources, _data, state) do
     Store.save_datasource_map(state.dashboard_uid, state.datasource_inputs)
-    send(:tui_app_loop, {:app_event, :refresh_dashboards, nil})
+    Drafter.AppRegistry.send_to_loop({:app_event, :refresh_dashboards, nil})
     {:pop, :done}
   end
 
   def handle_event(:skip_datasources, _data, _state) do
-    send(:tui_app_loop, {:app_event, :refresh_dashboards, nil})
+    Drafter.AppRegistry.send_to_loop({:app_event, :refresh_dashboards, nil})
     {:pop, :done}
   end
 

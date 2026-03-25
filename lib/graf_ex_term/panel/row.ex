@@ -17,7 +17,7 @@ defmodule GrafExTerm.Panel.Row do
       content_height: content_height,
       expanded: not collapsed,
       on_toggle: fn expanded ->
-        send(:tui_app_loop, {:app_event, {:toggle_row, panel.id}, not expanded})
+        Drafter.AppRegistry.send_to_loop({:app_event, {:toggle_row, panel.id}, not expanded})
       end
     )
   end

@@ -23,6 +23,7 @@ defmodule GrafExTerm.Screen.Main do
       collapsed_rows: MapSet.new(),
       row_filter: nil,
       table_layouts: %{},
+      column_filter: false,
       scrolling: false,
       pending_data: nil
     }
@@ -126,9 +127,17 @@ defmodule GrafExTerm.Screen.Main do
         ],
         flex: 1
       ),
+      horizontal(
+        [
+          button("+Add", on_click: :add_dashboard, variant: :primary),
+          checkbox("Filter", id: :column_filter, checked: state.column_filter, on_change: :toggle_column_filter)
+        ],
+        gap: 2
+      ),
       footer(
         bindings: [
           {"a", "add"},
+          {"f", "filter"},
           {"r", "refresh"},
           {"q", "quit"}
         ]
@@ -173,6 +182,8 @@ defmodule GrafExTerm.Screen.Main do
              variables: initial_variables(dashboard),
              column_visibility: Store.get_column_visibility(uid),
              table_layouts: Store.get_table_layouts(uid),
+             collapsed_rows: initial_collapsed_rows(uid, dashboard.panels),
+             column_filter: Store.get_column_filter(uid),
              loading: true,
              data_version: nil,
              row_filter: nil,
@@ -192,6 +203,11 @@ defmodule GrafExTerm.Screen.Main do
 
   def handle_event(:refresh_dashboards, _data, state) do
     {:ok, %{state | dashboards: Store.list()}}
+  end
+
+  def handle_event(:toggle_column_filter, checked, state) do
+    if state.selected_uid, do: Store.save_column_filter(state.selected_uid, checked)
+    {:ok, %{state | column_filter: checked}}
   end
 
   def handle_event({:toggle_column, panel_id, col_key}, checked, state) do
@@ -227,6 +243,7 @@ defmodule GrafExTerm.Screen.Main do
 
     if state.selected_uid do
       Scheduler.set_collapsed_rows(state.selected_uid, new_collapsed)
+      Store.save_collapsed_rows(state.selected_uid, new_collapsed)
 
       unless collapsed do
         Scheduler.refresh_now(state.selected_uid)
@@ -241,6 +258,12 @@ defmodule GrafExTerm.Screen.Main do
   def handle_event({:key, :a}, _state) do
     {:show_modal, GrafExTerm.Screen.AddDashboardModal, %{},
      [title: "Add Dashboard", width: 60, height: 16]}
+  end
+
+  def handle_event({:key, :f}, state) do
+    new_filter = not state.column_filter
+    if state.selected_uid, do: Store.save_column_filter(state.selected_uid, new_filter)
+    {:ok, %{state | column_filter: new_filter}}
   end
 
   def handle_event({:key, :r}, %{selected_uid: nil} = state), do: {:noreply, state}
@@ -268,8 +291,7 @@ defmodule GrafExTerm.Screen.Main do
         selected: state.selected_uid,
         on_change: :select_dashboard,
         height: length(items)
-      ),
-      button("[+] Add", on_click: :add_dashboard, variant: :primary)
+      )
     ]
   end
 
@@ -290,7 +312,10 @@ defmodule GrafExTerm.Screen.Main do
           state.variables,
           state.column_visibility,
           state.collapsed_rows,
-          state.table_layouts
+          state.table_layouts,
+          MapSet.new(),
+          false,
+          state.column_filter
         )
 
       {:error, _} ->
@@ -314,6 +339,18 @@ defmodule GrafExTerm.Screen.Main do
     case Registry.lookup(GrafExTerm.VarRegistry, uid) do
       [{pid, _}] -> DynamicSupervisor.terminate_child(GrafExTerm.VarSupervisor, pid)
       _ -> :ok
+    end
+  end
+
+  defp initial_collapsed_rows(uid, panels) do
+    stored = Store.get_collapsed_rows(uid)
+
+    if MapSet.size(stored) > 0 do
+      stored
+    else
+      panels
+      |> Enum.filter(fn p -> p.type == "row" end)
+      |> MapSet.new(fn p -> p.id end)
     end
   end
 

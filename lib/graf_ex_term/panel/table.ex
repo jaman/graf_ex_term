@@ -25,22 +25,22 @@ defmodule GrafExTerm.Panel.Table do
 
   def prepare(_, _, _), do: {[], []}
 
-  def render(panel, data, height, visible_columns \\ nil, layout \\ nil)
+  def render(panel, data, height, visible_columns \\ nil, layout \\ nil, column_filter \\ false)
 
-  def render(panel, {:prepared, rows, all_columns}, height, visible_columns, layout) do
-    render_table(panel, rows, all_columns, height, visible_columns, layout)
+  def render(panel, {:prepared, rows, all_columns}, height, visible_columns, layout, column_filter) do
+    render_table(panel, rows, all_columns, height, visible_columns, layout, column_filter)
   end
 
-  def render(panel, {:ok, series}, height, visible_columns, layout) do
+  def render(panel, {:ok, series}, height, visible_columns, layout, column_filter) do
     {rows, all_columns} = prepare({:ok, series})
-    render_table(panel, rows, all_columns, height, visible_columns, layout)
+    render_table(panel, rows, all_columns, height, visible_columns, layout, column_filter)
   end
 
-  def render(_panel, _, height, _visible_columns, _layout) do
+  def render(_panel, _, height, _visible_columns, _layout, _column_filter) do
     placeholder(label: "No data", height: height)
   end
 
-  defp render_table(panel, rows, all_columns, height, visible_columns, layout) do
+  defp render_table(panel, rows, all_columns, height, visible_columns, layout, column_filter) do
     active_columns =
       if visible_columns == nil or MapSet.size(visible_columns) == 0 do
         all_columns
@@ -48,8 +48,21 @@ defmodule GrafExTerm.Panel.Table do
         Enum.filter(all_columns, fn c -> MapSet.member?(visible_columns, c.key) end)
       end
 
+    layout_opts = if layout do
+      [col_widths: layout.col_widths, col_order: layout.col_order]
+    else
+      []
+    end
+
+    if column_filter do
+      render_table_with_filter(panel, rows, all_columns, active_columns, height, visible_columns, layout_opts)
+    else
+      render_table_plain(panel, rows, active_columns, height, layout_opts)
+    end
+  end
+
+  defp render_table_with_filter(panel, rows, all_columns, active_columns, height, visible_columns, layout_opts) do
     col_count = length(all_columns)
-    col_selector_height = min(col_count, 6)
 
     checkboxes =
       Enum.map(all_columns, fn c ->
@@ -70,13 +83,8 @@ defmodule GrafExTerm.Panel.Table do
         expanded: false
       )
 
+    col_selector_height = min(col_count, 6)
     table_height = max(3, height - col_selector_height - 2)
-
-    layout_opts = if layout do
-      [col_widths: layout.col_widths, col_order: layout.col_order]
-    else
-      []
-    end
 
     table_widget =
       data_table(
@@ -93,7 +101,26 @@ defmodule GrafExTerm.Panel.Table do
         ] ++ layout_opts
       )
 
-    vertical([col_toggle, table_widget], height: height)
+    vertical([col_toggle, table_widget], [])
+  end
+
+  defp render_table_plain(panel, rows, active_columns, height, layout_opts) do
+    table_widget =
+      data_table(
+        [
+          id: :"data_table_#{panel.id}",
+          columns: active_columns,
+          data: rows,
+          show_header: true,
+          zebra_stripes: true,
+          height: height,
+          selection_mode: :multiple,
+          on_select: {:table_row_selected, panel.id},
+          on_layout_change: {:table_layout_changed, panel.id}
+        ] ++ layout_opts
+      )
+
+    table_widget
   end
 
   defp attach_color_fns(columns, field_config) when map_size(field_config) == 0, do: columns

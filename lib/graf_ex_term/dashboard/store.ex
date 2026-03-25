@@ -6,45 +6,51 @@ defmodule GrafExTerm.Dashboard.Store do
 
   @cache :graf_ex_term_dashboards
 
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, [], name: __MODULE__)
-  end
+  @serializers %{
+    column_visibility: {&__MODULE__.serialize_column_visibility/1, &__MODULE__.deserialize_column_visibility/1},
+    table_layouts: {&__MODULE__.serialize_table_layouts/1, &__MODULE__.deserialize_table_layouts/1},
+    collapsed_rows: {&__MODULE__.serialize_id_set/1, &__MODULE__.deserialize_id_set/1},
+    collapsed_table_panels: {&__MODULE__.serialize_id_set/1, &__MODULE__.deserialize_id_set/1}
+  }
 
-  def list do
-    GenServer.call(__MODULE__, :list)
-  end
+  @defaults %{
+    datasource_map: %{},
+    column_visibility: %{},
+    table_layouts: %{},
+    collapsed_rows: MapSet.new(),
+    collapsed_table_panels: MapSet.new(),
+    column_filter: false
+  }
 
-  def add(uri) do
-    GenServer.call(__MODULE__, {:add, uri}, 30_000)
-  end
+  def start_link(_opts), do: GenServer.start_link(__MODULE__, [], name: __MODULE__)
 
-  def remove(uid) do
-    GenServer.call(__MODULE__, {:remove, uid})
-  end
+  def list, do: GenServer.call(__MODULE__, :list)
+  def add(uri), do: GenServer.call(__MODULE__, {:add, uri}, 30_000)
+  def remove(uid), do: GenServer.call(__MODULE__, {:remove, uid})
 
-  def save_datasource_map(uid, datasource_map) do
-    GenServer.call(__MODULE__, {:save_datasource_map, uid, datasource_map})
-  end
+  @spec save_setting(String.t(), atom(), term()) :: :ok
+  def save_setting(uid, key, value), do: GenServer.cast(__MODULE__, {:save_setting, uid, key, value})
 
-  def get_datasource_map(uid) do
-    GenServer.call(__MODULE__, {:get_datasource_map, uid})
-  end
+  @spec get_setting(String.t(), atom()) :: term()
+  def get_setting(uid, key), do: GenServer.call(__MODULE__, {:get_setting, uid, key})
 
-  def save_column_visibility(uid, column_visibility) do
-    GenServer.call(__MODULE__, {:save_column_visibility, uid, column_visibility})
-  end
+  def save_datasource_map(uid, value), do: GenServer.call(__MODULE__, {:save_datasource_map, uid, value})
+  def get_datasource_map(uid), do: get_setting(uid, :datasource_map)
 
-  def get_column_visibility(uid) do
-    GenServer.call(__MODULE__, {:get_column_visibility, uid})
-  end
+  def save_column_visibility(uid, value), do: save_setting(uid, :column_visibility, value)
+  def get_column_visibility(uid), do: get_setting(uid, :column_visibility)
 
   def save_table_layout(uid, panel_id, layout) do
     GenServer.cast(__MODULE__, {:save_table_layout, uid, panel_id, layout})
   end
 
-  def get_table_layouts(uid) do
-    GenServer.call(__MODULE__, {:get_table_layouts, uid})
-  end
+  def get_table_layouts(uid), do: get_setting(uid, :table_layouts)
+  def save_collapsed_rows(uid, value), do: save_setting(uid, :collapsed_rows, value)
+  def get_collapsed_rows(uid), do: get_setting(uid, :collapsed_rows)
+  def save_collapsed_table_panels(uid, value), do: save_setting(uid, :collapsed_table_panels, value)
+  def get_collapsed_table_panels(uid), do: get_setting(uid, :collapsed_table_panels)
+  def save_column_filter(uid, value), do: save_setting(uid, :column_filter, value)
+  def get_column_filter(uid), do: get_setting(uid, :column_filter)
 
   def get_dashboard(uid) do
     case Cachex.get(@cache, uid) do
@@ -56,9 +62,7 @@ defmodule GrafExTerm.Dashboard.Store do
 
   def init(_) do
     entries = load_persisted()
-    Enum.each(entries, fn entry ->
-      Cachex.put(@cache, entry.uid, entry.dashboard)
-    end)
+    Enum.each(entries, fn entry -> Cachex.put(@cache, entry.uid, entry.dashboard) end)
     {:ok, %{entries: entries}}
   end
 
@@ -91,43 +95,28 @@ defmodule GrafExTerm.Dashboard.Store do
   end
 
   def handle_call({:save_datasource_map, uid, datasource_map}, _from, state) do
-    new_entries =
-      Enum.map(state.entries, fn e ->
-        if e.uid == uid, do: Map.put(e, :datasource_map, datasource_map), else: e
-      end)
+    new_entries = update_entry(state.entries, uid, :datasource_map, datasource_map)
     persist(new_entries)
     {:reply, :ok, %{state | entries: new_entries}}
   end
 
-  def handle_call({:get_datasource_map, uid}, _from, state) do
-    case Enum.find(state.entries, fn e -> e.uid == uid end) do
-      nil -> {:reply, %{}, state}
-      entry -> {:reply, Map.get(entry, :datasource_map, %{}), state}
-    end
+  def handle_call({:get_setting, uid, key}, _from, state) do
+    default = Map.get(@defaults, key)
+
+    raw =
+      case Enum.find(state.entries, fn e -> e.uid == uid end) do
+        nil -> default
+        entry -> Map.get(entry, key, default)
+      end
+
+    {:reply, deserialize(key, raw), state}
   end
 
-  def handle_call({:save_column_visibility, uid, column_visibility}, _from, state) do
-    serializable = serialize_column_visibility(column_visibility)
-    new_entries =
-      Enum.map(state.entries, fn e ->
-        if e.uid == uid, do: Map.put(e, :column_visibility, serializable), else: e
-      end)
+  def handle_cast({:save_setting, uid, key, value}, state) do
+    serialized = serialize(key, value)
+    new_entries = update_entry(state.entries, uid, key, serialized)
     persist(new_entries)
-    {:reply, :ok, %{state | entries: new_entries}}
-  end
-
-  def handle_call({:get_column_visibility, uid}, _from, state) do
-    case Enum.find(state.entries, fn e -> e.uid == uid end) do
-      nil -> {:reply, %{}, state}
-      entry -> {:reply, deserialize_column_visibility(Map.get(entry, :column_visibility, %{})), state}
-    end
-  end
-
-  def handle_call({:get_table_layouts, uid}, _from, state) do
-    case Enum.find(state.entries, fn e -> e.uid == uid end) do
-      nil -> {:reply, %{}, state}
-      entry -> {:reply, Map.get(entry, :table_layouts, %{}), state}
-    end
+    {:noreply, %{state | entries: new_entries}}
   end
 
   def handle_cast({:save_table_layout, uid, panel_id, layout}, state) do
@@ -169,31 +158,54 @@ defmodule GrafExTerm.Dashboard.Store do
       |> Map.get("datasource_map", %{})
       |> Enum.into(%{}, fn {k, v} -> {k, v} end)
 
-    column_visibility = deserialize_column_visibility(Map.get(entry, "column_visibility", %{}))
-    table_layouts = deserialize_table_layouts(Map.get(entry, "table_layouts", %{}))
+    json_defaults = %{
+      column_visibility: %{},
+      table_layouts: %{},
+      collapsed_rows: [],
+      collapsed_table_panels: [],
+      column_filter: false
+    }
+
+    settings =
+      Enum.reduce(json_defaults, %{}, fn {key, json_default}, acc ->
+        json_key = to_string(key)
+        Map.put(acc, key, Map.get(entry, json_key, json_default))
+      end)
 
     with {:ok, raw} <- Loader.load(uri),
          {:ok, dashboard} <- Parser.parse(raw) do
-      [%{uid: dashboard.uid, uri: uri, dashboard: dashboard, datasource_map: datasource_map, column_visibility: column_visibility, table_layouts: table_layouts}]
+      [Map.merge(settings, %{uid: dashboard.uid, uri: uri, dashboard: dashboard, datasource_map: datasource_map})]
     else
       _ -> []
     end
   end
 
+  @persisted_keys [:datasource_map, :column_visibility, :table_layouts, :collapsed_rows, :collapsed_table_panels, :column_filter]
+
   defp persist(entries) do
     data = Enum.map(entries, fn e ->
-      %{
-        uid: e.uid,
-        uri: e.uri,
-        datasource_map: Map.get(e, :datasource_map, %{}),
-        column_visibility: serialize_column_visibility(Map.get(e, :column_visibility, %{})),
-        table_layouts: serialize_table_layouts(Map.get(e, :table_layouts, %{}))
-      }
+      Enum.reduce(@persisted_keys, %{uid: e.uid, uri: e.uri}, fn key, acc ->
+        Map.put(acc, key, Map.get(e, key, Map.get(@defaults, key)))
+      end)
     end)
     File.write!(store_path(), Jason.encode!(data))
   end
 
-  defp serialize_column_visibility(column_visibility) do
+  defp serialize(key, value) do
+    case Map.get(@serializers, key) do
+      {serializer, _} -> serializer.(value)
+      nil -> value
+    end
+  end
+
+  defp deserialize(key, value) do
+    case Map.get(@serializers, key) do
+      {_, deserializer} -> deserializer.(value)
+      nil -> value
+    end
+  end
+
+  def serialize_column_visibility(column_visibility) when is_map(column_visibility) do
     Map.new(column_visibility, fn {panel_id, keys} ->
       list = case keys do
         %MapSet{} -> MapSet.to_list(keys)
@@ -204,14 +216,48 @@ defmodule GrafExTerm.Dashboard.Store do
     end)
   end
 
-  defp deserialize_column_visibility(raw) when is_map(raw) do
+  def serialize_column_visibility(val), do: val
+
+  def deserialize_column_visibility(raw) when is_map(raw) do
     Map.new(raw, fn {panel_id_str, keys} ->
       panel_id = parse_panel_id(panel_id_str)
       {panel_id, MapSet.new(keys, fn k -> if is_atom(k), do: k, else: String.to_atom(k) end)}
     end)
   end
 
-  defp deserialize_column_visibility(_), do: %{}
+  def deserialize_column_visibility(_), do: %{}
+
+  def serialize_table_layouts(table_layouts) when is_map(table_layouts) do
+    Map.new(table_layouts, fn {panel_id, layout} ->
+      {to_string(panel_id), %{col_widths: layout.col_widths, col_order: layout.col_order}}
+    end)
+  end
+
+  def serialize_table_layouts(val), do: val
+
+  def deserialize_table_layouts(raw) when is_map(raw) do
+    Map.new(raw, fn {panel_id_str, layout} ->
+      panel_id = parse_panel_id(panel_id_str)
+      {panel_id, %{col_widths: layout["col_widths"], col_order: layout["col_order"]}}
+    end)
+  end
+
+  def deserialize_table_layouts(_), do: %{}
+
+  def serialize_id_set(%MapSet{} = set), do: MapSet.to_list(set) |> Enum.map(&to_string/1)
+  def serialize_id_set(list) when is_list(list), do: Enum.map(list, &to_string/1)
+  def serialize_id_set(_), do: []
+
+  def deserialize_id_set(list) when is_list(list) do
+    MapSet.new(list, fn id ->
+      case Integer.parse(to_string(id)) do
+        {n, ""} -> n
+        _ -> id
+      end
+    end)
+  end
+
+  def deserialize_id_set(_), do: MapSet.new()
 
   defp parse_panel_id(id) when is_integer(id), do: id
 
@@ -224,18 +270,9 @@ defmodule GrafExTerm.Dashboard.Store do
 
   defp parse_panel_id(id), do: id
 
-  defp serialize_table_layouts(table_layouts) do
-    Map.new(table_layouts, fn {panel_id, layout} ->
-      {to_string(panel_id), %{col_widths: layout.col_widths, col_order: layout.col_order}}
+  defp update_entry(entries, uid, key, value) do
+    Enum.map(entries, fn e ->
+      if e.uid == uid, do: Map.put(e, key, value), else: e
     end)
   end
-
-  defp deserialize_table_layouts(raw) when is_map(raw) do
-    Map.new(raw, fn {panel_id_str, layout} ->
-      panel_id = parse_panel_id(panel_id_str)
-      {panel_id, %{col_widths: layout["col_widths"], col_order: layout["col_order"]}}
-    end)
-  end
-
-  defp deserialize_table_layouts(_), do: %{}
 end
