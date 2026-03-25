@@ -1,8 +1,8 @@
 defmodule GrafExTerm.Dashboard.Loader do
+  @moduledoc false
   def load("file://" <> path) do
-    with {:ok, body} <- File.read(path),
-         {:ok, raw} <- Jason.decode(body) do
-      {:ok, raw}
+    with {:ok, body} <- File.read(path) do
+      Jason.decode(body)
     end
   end
 

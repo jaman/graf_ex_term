@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Variable.Manager do
+  @moduledoc false
   use GenServer
 
   alias GrafExTerm.Variable.Substitution

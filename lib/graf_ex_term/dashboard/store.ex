@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Dashboard.Store do
+  @moduledoc false
   use GenServer
 
   alias GrafExTerm.Dashboard.{Loader, Parser}
@@ -156,24 +157,24 @@ defmodule GrafExTerm.Dashboard.Store do
     with true <- File.exists?(path),
          {:ok, contents} <- File.read(path),
          {:ok, raw_list} <- Jason.decode(contents) do
-      Enum.flat_map(raw_list, fn %{"uri" => uri} = entry ->
-        datasource_map =
-          entry
-          |> Map.get("datasource_map", %{})
-          |> Enum.into(%{}, fn {k, v} -> {k, v} end)
+      Enum.flat_map(raw_list, &load_persisted_entry/1)
+    else
+      _ -> []
+    end
+  end
 
-        column_visibility = deserialize_column_visibility(Map.get(entry, "column_visibility", %{}))
-        table_layouts = deserialize_table_layouts(Map.get(entry, "table_layouts", %{}))
+  defp load_persisted_entry(%{"uri" => uri} = entry) do
+    datasource_map =
+      entry
+      |> Map.get("datasource_map", %{})
+      |> Enum.into(%{}, fn {k, v} -> {k, v} end)
 
-        case Loader.load(uri) do
-          {:ok, raw} ->
-            case Parser.parse(raw) do
-              {:ok, dashboard} -> [%{uid: dashboard.uid, uri: uri, dashboard: dashboard, datasource_map: datasource_map, column_visibility: column_visibility, table_layouts: table_layouts}]
-              _ -> []
-            end
-          _ -> []
-        end
-      end)
+    column_visibility = deserialize_column_visibility(Map.get(entry, "column_visibility", %{}))
+    table_layouts = deserialize_table_layouts(Map.get(entry, "table_layouts", %{}))
+
+    with {:ok, raw} <- Loader.load(uri),
+         {:ok, dashboard} <- Parser.parse(raw) do
+      [%{uid: dashboard.uid, uri: uri, dashboard: dashboard, datasource_map: datasource_map, column_visibility: column_visibility, table_layouts: table_layouts}]
     else
       _ -> []
     end
@@ -205,21 +206,23 @@ defmodule GrafExTerm.Dashboard.Store do
 
   defp deserialize_column_visibility(raw) when is_map(raw) do
     Map.new(raw, fn {panel_id_str, keys} ->
-      panel_id =
-        cond do
-          is_integer(panel_id_str) -> panel_id_str
-          is_binary(panel_id_str) ->
-            case Integer.parse(panel_id_str) do
-              {n, ""} -> n
-              _ -> panel_id_str
-            end
-          true -> panel_id_str
-        end
+      panel_id = parse_panel_id(panel_id_str)
       {panel_id, MapSet.new(keys, fn k -> if is_atom(k), do: k, else: String.to_atom(k) end)}
     end)
   end
 
   defp deserialize_column_visibility(_), do: %{}
+
+  defp parse_panel_id(id) when is_integer(id), do: id
+
+  defp parse_panel_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {n, ""} -> n
+      _ -> id
+    end
+  end
+
+  defp parse_panel_id(id), do: id
 
   defp serialize_table_layouts(table_layouts) do
     Map.new(table_layouts, fn {panel_id, layout} ->
@@ -229,16 +232,7 @@ defmodule GrafExTerm.Dashboard.Store do
 
   defp deserialize_table_layouts(raw) when is_map(raw) do
     Map.new(raw, fn {panel_id_str, layout} ->
-      panel_id =
-        cond do
-          is_integer(panel_id_str) -> panel_id_str
-          is_binary(panel_id_str) ->
-            case Integer.parse(panel_id_str) do
-              {n, ""} -> n
-              _ -> panel_id_str
-            end
-          true -> panel_id_str
-        end
+      panel_id = parse_panel_id(panel_id_str)
       {panel_id, %{col_widths: layout["col_widths"], col_order: layout["col_order"]}}
     end)
   end

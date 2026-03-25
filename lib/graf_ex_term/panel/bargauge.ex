@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Panel.Bargauge do
+  @moduledoc false
   import Drafter.App, only: [vertical: 1, horizontal: 2, label: 1, progress_bar: 1, placeholder: 1]
 
   def render(panel, {:ok, series}, height) when series != [] do

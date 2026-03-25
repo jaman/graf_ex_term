@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Screen.VariableBar do
+  @moduledoc false
   import Drafter.App, only: [horizontal: 2, label: 2, option_list: 2]
 
   def render([], _values), do: horizontal([], gap: 0)

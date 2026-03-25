@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Panel.Stat do
+  @moduledoc false
   import Drafter.App, only: [vertical: 2, horizontal: 2, label: 2, digits: 2, switch: 1, placeholder: 1]
 
   alias Drafter.Format
@@ -98,21 +99,16 @@ defmodule GrafExTerm.Panel.Stat do
   end
 
   defp format_value(value, _unit) when not is_number(value), do: to_string(value)
-
-  defp format_value(value, unit) when is_number(value) do
-    case unit do
-      "percent" -> Format.percent(value, decimals: 1)
-      "percentunit" -> Format.percent(value, as_ratio: true, decimals: 1)
-      "bytes" -> Format.bytes(value)
-      "decbytes" -> Format.bytes(value)
-      "bits" -> Format.bytes(trunc(value / 8))
-      "short" -> Format.compact(value)
-      "s" -> format_duration(value)
-      "ms" -> format_duration(value / 1000)
-      "ns" -> format_duration(value / 1_000_000_000)
-      _ -> Format.compact(value)
-    end
-  end
+  defp format_value(value, "percent"), do: Format.percent(value, decimals: 1)
+  defp format_value(value, "percentunit"), do: Format.percent(value, as_ratio: true, decimals: 1)
+  defp format_value(value, "bytes"), do: Format.bytes(value)
+  defp format_value(value, "decbytes"), do: Format.bytes(value)
+  defp format_value(value, "bits"), do: Format.bytes(trunc(value / 8))
+  defp format_value(value, "short"), do: Format.compact(value)
+  defp format_value(value, "s"), do: format_duration(value)
+  defp format_value(value, "ms"), do: format_duration(value / 1000)
+  defp format_value(value, "ns"), do: format_duration(value / 1_000_000_000)
+  defp format_value(value, _unit), do: Format.compact(value)
 
   defp format_duration(seconds) when is_number(seconds) do
     cond do
@@ -146,63 +142,56 @@ defmodule GrafExTerm.Panel.Stat do
 
   defp boolean_mappings(field_config) do
     mappings = get_in(field_config, ["defaults", "mappings"]) || []
+    text_map = Enum.reduce(mappings, %{}, &extract_mapping_entries/2)
+    classify_boolean_pair(text_map)
+  end
 
-    text_map =
-      Enum.reduce(mappings, %{}, fn mapping, acc ->
-        case Map.get(mapping, "type") do
-          "value" ->
-            options = Map.get(mapping, "options", %{})
+  defp extract_mapping_entries(%{"type" => "value", "options" => options}, acc) when is_map(options) do
+    Enum.reduce(options, acc, &extract_value_option/2)
+  end
 
-            Enum.reduce(options, acc, fn {key, config}, inner_acc ->
-              case Map.get(config, "text") do
-                text when is_binary(text) ->
-                  color = Map.get(config, "color")
-                  Map.put(inner_acc, key, {text, color})
+  defp extract_mapping_entries(%{"type" => type} = mapping, acc) when type in [1, 2] do
+    val = to_string(Map.get(mapping, "value", ""))
+    text = Map.get(mapping, "text")
 
-                _ ->
-                  inner_acc
-              end
-            end)
-
-          type when type in [1, 2] ->
-            val = to_string(Map.get(mapping, "value", ""))
-            text = Map.get(mapping, "text")
-
-            if is_binary(text) and val != "" do
-              Map.put(acc, val, {text, Map.get(mapping, "color")})
-            else
-              acc
-            end
-
-          _ ->
-            acc
-        end
-      end)
-
-    case Map.keys(text_map) do
-      keys when length(keys) == 2 ->
-        [{_k1, {t1, c1}}, {k2, {t2, c2}}] = Enum.sort_by(text_map, fn {k, _} -> k end)
-        pair = {String.downcase(t1), String.downcase(t2)}
-        reverse_pair = {String.downcase(t2), String.downcase(t1)}
-
-        cond do
-          MapSet.member?(@boolean_pairs, pair) ->
-            {on_text, on_color} = if truthy_key?(k2), do: {t2, resolve_color(c2)}, else: {t1, resolve_color(c1)}
-            {off_text, off_color} = if truthy_key?(k2), do: {t1, resolve_color(c1)}, else: {t2, resolve_color(c2)}
-            {:boolean, on_text, off_text, on_color, off_color}
-
-          MapSet.member?(@boolean_pairs, reverse_pair) ->
-            {on_text, on_color} = if truthy_key?(k2), do: {t2, resolve_color(c2)}, else: {t1, resolve_color(c1)}
-            {off_text, off_color} = if truthy_key?(k2), do: {t1, resolve_color(c1)}, else: {t2, resolve_color(c2)}
-            {:boolean, on_text, off_text, on_color, off_color}
-
-          true ->
-            :not_boolean
-        end
-
-      _ ->
-        :not_boolean
+    if is_binary(text) and val != "" do
+      Map.put(acc, val, {text, Map.get(mapping, "color")})
+    else
+      acc
     end
+  end
+
+  defp extract_mapping_entries(_mapping, acc), do: acc
+
+  defp extract_value_option({key, config}, acc) do
+    case Map.get(config, "text") do
+      text when is_binary(text) -> Map.put(acc, key, {text, Map.get(config, "color")})
+      _ -> acc
+    end
+  end
+
+  defp classify_boolean_pair(text_map) do
+    keys = Map.keys(text_map)
+
+    if length(keys) == 2 do
+      [{_k1, {t1, c1}}, {k2, {t2, c2}}] = Enum.sort_by(text_map, fn {k, _} -> k end)
+      pair = {String.downcase(t1), String.downcase(t2)}
+      reverse_pair = {String.downcase(t2), String.downcase(t1)}
+
+      if MapSet.member?(@boolean_pairs, pair) or MapSet.member?(@boolean_pairs, reverse_pair) do
+        build_boolean_result(k2, t1, c1, t2, c2)
+      else
+        :not_boolean
+      end
+    else
+      :not_boolean
+    end
+  end
+
+  defp build_boolean_result(k2, t1, c1, t2, c2) do
+    {on_text, on_color} = if truthy_key?(k2), do: {t2, resolve_color(c2)}, else: {t1, resolve_color(c1)}
+    {off_text, off_color} = if truthy_key?(k2), do: {t1, resolve_color(c1)}, else: {t2, resolve_color(c2)}
+    {:boolean, on_text, off_text, on_color, off_color}
   end
 
   defp truthy_key?("1"), do: true

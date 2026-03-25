@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Datasource.Prometheus do
+  @moduledoc false
   @behaviour GrafExTerm.Datasource.Behaviour
 
   @impl true

@@ -13,3 +13,4 @@ config :graf_ex_term,
   default_refresh_ms: 30_000,
   time_range_seconds: 3600,
   chart_resolution: 300
+tWi'

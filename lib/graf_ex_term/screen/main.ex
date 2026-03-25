@@ -1,12 +1,13 @@
 defmodule GrafExTerm.Screen.Main do
-  use Drafter.App
+  @moduledoc false
+  use Drafter.App, mouse_hover: false
   import Drafter.App
 
   alias GrafExTerm.Dashboard.Store
   alias GrafExTerm.Layout.GridMapper
-  alias GrafExTerm.Variable.Manager
-  alias GrafExTerm.Refresh.{Scheduler, DataCache}
   alias GrafExTerm.Panel.{Table, Timeseries}
+  alias GrafExTerm.Refresh.{DataCache, Scheduler}
+  alias GrafExTerm.Variable.Manager
 
   def mount(_props) do
     %{
@@ -27,9 +28,12 @@ defmodule GrafExTerm.Screen.Main do
     }
   end
 
+  def refresh_rate, do: :unlimited
+
   def on_ready(state) do
     theme = Application.get_env(:graf_ex_term, :theme, "tokyo-night")
     Drafter.ThemeManager.set_theme(theme)
+    Drafter.set_interval(1000, :clock_tick)
     %{state | dashboards: Store.list()}
   end
 
@@ -79,6 +83,7 @@ defmodule GrafExTerm.Screen.Main do
     end
   end
 
+  def on_timer(:clock_tick, state), do: state
   def on_timer(_timer_id, state), do: state
 
   def on_scroll_active(state), do: %{state | scrolling: true}
@@ -336,11 +341,11 @@ defmodule GrafExTerm.Screen.Main do
     active_ids = active_panel_ids(panels, collapsed_rows)
 
     Map.new(panel_data, fn {panel_id, data} ->
-      if not MapSet.member?(active_ids, panel_id) do
-        {panel_id, data}
-      else
+      if MapSet.member?(active_ids, panel_id) do
         panel = Map.get(panel_map, panel_id)
         {panel_id, prepare_single_panel(panel, data, row_filter)}
+      else
+        {panel_id, data}
       end
     end)
   end
@@ -362,14 +367,16 @@ defmodule GrafExTerm.Screen.Main do
   defp active_panel_ids(panels, collapsed_rows) do
     panels
     |> Enum.sort_by(fn p -> {p.grid_pos.y, p.grid_pos.x} end)
-    |> Enum.reduce({MapSet.new(), false}, fn panel, {acc, in_collapsed} ->
-      case panel.type do
-        "row" -> {acc, MapSet.member?(collapsed_rows, panel.id)}
-        _ -> if in_collapsed, do: {acc, true}, else: {MapSet.put(acc, panel.id), false}
-      end
-    end)
+    |> Enum.reduce({MapSet.new(), false}, &classify_panel(&1, &2, collapsed_rows))
     |> elem(0)
   end
+
+  defp classify_panel(%{type: "row"} = panel, {acc, _}, collapsed_rows) do
+    {acc, MapSet.member?(collapsed_rows, panel.id)}
+  end
+
+  defp classify_panel(_panel, {acc, true}, _collapsed_rows), do: {acc, true}
+  defp classify_panel(panel, {acc, false}, _collapsed_rows), do: {MapSet.put(acc, panel.id), false}
 
   defp refilter_series(prepared, raw_panel_data, panels, filter) do
     panel_map = Map.new(panels, fn p -> {p.id, p} end)
@@ -390,19 +397,17 @@ defmodule GrafExTerm.Screen.Main do
   defp apply_row_filter(data, nil), do: data
 
   defp apply_row_filter({:ok, series}, filters) do
-    filtered =
-      Enum.filter(series, fn s ->
-        Enum.any?(filters, fn filter ->
-          Enum.all?(filter, fn {key, val} ->
-            Map.get(s.labels, key) == val
-          end)
-        end)
-      end)
-
+    filtered = Enum.filter(series, &series_matches_any_filter?(&1, filters))
     {:ok, filtered}
   end
 
   defp apply_row_filter(data, _filters), do: data
+
+  defp series_matches_any_filter?(series_entry, filters) do
+    Enum.any?(filters, fn filter ->
+      Enum.all?(filter, fn {key, val} -> Map.get(series_entry.labels, key) == val end)
+    end)
+  end
 
   defp extract_label_filter(rows) do
     excluded_keys = [:time, :value]
@@ -415,10 +420,8 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   defp fetch_vars(uid) do
-    try do
-      Manager.get_values(uid)
-    catch
-      _, _ -> %{}
-    end
+    Manager.get_values(uid)
+  catch
+    _, _ -> %{}
   end
 end

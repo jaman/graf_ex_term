@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Panel.Row do
+  @moduledoc false
   import Drafter.App, only: [collapsible: 3]
 
   def render(panel, collapsed, panel_count \\ 0, children \\ [], content_height \\ 0) do

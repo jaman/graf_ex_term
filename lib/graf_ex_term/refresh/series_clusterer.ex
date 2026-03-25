@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Refresh.SeriesClusterer do
+  @moduledoc false
   @max_series 30
   @min_series_for_clustering 25
 
@@ -19,12 +20,10 @@ defmodule GrafExTerm.Refresh.SeriesClusterer do
     epsilon = range / max(target_k, 1)
     groups = do_epsilon_group(sorted_scored, epsilon)
 
-    cond do
-      length(groups) <= target_k ->
-        groups
-
-      true ->
-        merge_smallest_gaps(groups, target_k)
+    if length(groups) <= target_k do
+      groups
+    else
+      merge_smallest_gaps(groups, target_k)
     end
   end
 

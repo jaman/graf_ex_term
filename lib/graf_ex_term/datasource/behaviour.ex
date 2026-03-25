@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Datasource.Behaviour do
+  @moduledoc false
   @callback query(config :: map(), expr :: String.t(), time_range :: {integer(), integer()}, step :: integer()) ::
               {:ok, list()} | {:error, term()}
 

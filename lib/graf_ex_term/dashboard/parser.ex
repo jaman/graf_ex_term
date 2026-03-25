@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Dashboard.Parser do
+  @moduledoc false
   alias GrafExTerm.Dashboard.Types.{Dashboard, Panel, Target, TemplateVar}
 
   def parse(%{"dashboard" => nested}) when is_map(nested), do: parse(nested)

@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Panel.Table do
+  @moduledoc false
   alias GrafExTerm.Panel.ColorRules
 
   import Drafter.App, only: [
@@ -139,13 +140,16 @@ defmodule GrafExTerm.Panel.Table do
 
   defp series_to_rows(series) do
     series
-    |> Enum.flat_map(fn s ->
-      Enum.map(s.values, fn {ts, val} ->
-        label_fields = Map.new(s.labels, fn {k, v} -> {String.to_atom(k), v} end)
-        Map.merge(label_fields, %{time: format_time(ts), value: Float.round(val * 1.0, 2)})
-      end)
-    end)
+    |> Enum.flat_map(&series_entry_to_rows/1)
     |> Enum.take(100)
+  end
+
+  defp series_entry_to_rows(s) do
+    label_fields = Map.new(s.labels, fn {k, v} -> {String.to_atom(k), v} end)
+
+    Enum.map(s.values, fn {ts, val} ->
+      Map.merge(label_fields, %{time: format_time(ts), value: Float.round(val * 1.0, 2)})
+    end)
   end
 
   defp derive_columns([]), do: []

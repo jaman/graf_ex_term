@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Variable.Substitution do
+  @moduledoc false
   @grafana_builtins %{
     "__all" => ".*",
     "__interval" => "1m",

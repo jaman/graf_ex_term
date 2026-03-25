@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Panel.ColorRules do
+  @moduledoc false
   import Bitwise
   @grafana_colors %{
     "green"         => {115, 191, 105},
@@ -11,8 +12,8 @@ defmodule GrafExTerm.Panel.ColorRules do
     "dark-red"      => {196,  22,  42},
     "light-red"     => {255, 115, 131},
     "blue"          => {100, 149, 237},
-    "dark-blue"     => { 31,  96, 196},
-    "semi-dark-blue"=> { 50, 116, 217},
+    "dark-blue"     => {31, 96, 196},
+    "semi-dark-blue"=> {50, 116, 217},
     "light-blue"    => {138, 184, 255},
     "purple"        => {163,  82, 204},
     "dark-purple"   => {123,  52, 164},
@@ -62,17 +63,23 @@ defmodule GrafExTerm.Panel.ColorRules do
   defp parse_value_mappings(mappings) when is_list(mappings) do
     Enum.flat_map(mappings, fn
       %{"type" => "value", "options" => options} when is_map(options) ->
-        Enum.flat_map(options, fn {value, config} ->
-          case resolve_color(Map.get(config, "color")) do
-            nil -> []
-            color -> [{value, color}]
-          end
-        end)
-      _ -> []
+        extract_value_colors(options)
+
+      _ ->
+        []
     end)
   end
 
   defp parse_value_mappings(_), do: []
+
+  defp extract_value_colors(options) do
+    Enum.flat_map(options, fn {value, config} ->
+      case resolve_color(Map.get(config, "color")) do
+        nil -> []
+        color -> [{value, color}]
+      end
+    end)
+  end
 
   defp parse_thresholds(%{"steps" => steps}) when is_list(steps) do
     steps
@@ -85,34 +92,36 @@ defmodule GrafExTerm.Panel.ColorRules do
   defp parse_thresholds(_), do: []
 
   defp build_override_map(overrides) do
-    Enum.reduce(overrides, %{}, fn override, acc ->
-      name =
-        case get_in(override, ["matcher", "id"]) do
-          "byName" -> get_in(override, ["matcher", "options"])
-          _ -> nil
-        end
+    Enum.reduce(overrides, %{}, &accumulate_override/2)
+  end
 
-      if name do
-        properties = Map.get(override, "properties", [])
-        props = Map.new(properties, fn p -> {p["id"], p["value"]} end)
-
-        entry = %{}
-        entry =
-          case props["thresholds"] do
-            nil -> entry
-            t -> Map.put(entry, :thresholds, parse_thresholds(t))
-          end
-        entry =
-          case props["mappings"] do
-            nil -> entry
-            m -> Map.put(entry, :mappings, parse_value_mappings(m))
-          end
-
+  defp accumulate_override(override, acc) do
+    case get_in(override, ["matcher", "id"]) do
+      "byName" ->
+        name = get_in(override, ["matcher", "options"])
+        entry = parse_override_properties(Map.get(override, "properties", []))
         Map.put(acc, String.downcase(name), entry)
-      else
+
+      _ ->
         acc
+    end
+  end
+
+  defp parse_override_properties(properties) do
+    props = Map.new(properties, fn p -> {p["id"], p["value"]} end)
+
+    entry = %{}
+
+    entry =
+      case props["thresholds"] do
+        nil -> entry
+        t -> Map.put(entry, :thresholds, parse_thresholds(t))
       end
-    end)
+
+    case props["mappings"] do
+      nil -> entry
+      m -> Map.put(entry, :mappings, parse_value_mappings(m))
+    end
   end
 
   defp find_column_overrides(col, override_map) do
@@ -134,16 +143,18 @@ defmodule GrafExTerm.Panel.ColorRules do
   end
 
   defp build_color_fn(mappings, thresholds) do
-    fn value ->
-      str_val = to_string(value)
-      case Enum.find(mappings, fn {k, _} -> k == str_val end) do
-        {_, color} ->
-          with_contrast(color)
-        nil ->
-          if has_valued_steps?(thresholds) do
-            with_contrast(apply_thresholds(value, thresholds))
-          end
-      end
+    fn value -> resolve_cell_color(value, mappings, thresholds) end
+  end
+
+  defp resolve_cell_color(value, mappings, thresholds) do
+    str_val = to_string(value)
+
+    case Enum.find(mappings, fn {k, _} -> k == str_val end) do
+      {_, color} ->
+        with_contrast(color)
+
+      nil ->
+        if has_valued_steps?(thresholds), do: with_contrast(apply_thresholds(value, thresholds))
     end
   end
 
@@ -192,6 +203,4 @@ defmodule GrafExTerm.Panel.ColorRules do
   end
   defp resolve_color(name) when is_binary(name), do: Map.get(@grafana_colors, name)
   defp resolve_color(_), do: nil
-
-
 end

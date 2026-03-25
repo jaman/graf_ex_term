@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Dashboard.Registry do
+  @moduledoc false
   use GenServer
 
   alias GrafExTerm.Dashboard.{Loader, Parser}

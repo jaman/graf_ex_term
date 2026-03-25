@@ -1,4 +1,5 @@
 defmodule Mix.Tasks.DumpLayout do
+  @moduledoc false
   use Mix.Task
 
   alias GrafExTerm.Dashboard.Parser
@@ -26,16 +27,18 @@ defmodule Mix.Tasks.DumpLayout do
 
   defp group_by_row_section(panels) do
     {sections, current_row, current_panels} =
-      Enum.reduce(panels, {[], nil, []}, fn panel, {sections, current_row, current_panels} ->
-        if panel.type == "row" do
-          finished = if current_row || current_panels != [], do: [{current_row, current_panels}], else: []
-          {sections ++ finished, panel, []}
-        else
-          {sections, current_row, current_panels ++ [panel]}
-        end
-      end)
+      Enum.reduce(panels, {[], nil, []}, &accumulate_section/2)
 
     sections ++ [{current_row, current_panels}]
+  end
+
+  defp accumulate_section(%{type: "row"} = panel, {sections, current_row, current_panels}) do
+    finished = if current_row || current_panels != [], do: [{current_row, current_panels}], else: []
+    {sections ++ finished, panel, []}
+  end
+
+  defp accumulate_section(panel, {sections, current_row, current_panels}) do
+    {sections, current_row, current_panels ++ [panel]}
   end
 
   defp section_to_code({nil, panels}, height_ratio) do

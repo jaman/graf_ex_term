@@ -20,7 +20,7 @@ defmodule GrafExTerm.Layout.GridMapperTest do
       panels = [panel(1, "timeseries", 0, 0, 24, 8)]
       result = GridMapper.to_tui_layout(panels, %{})
       assert is_list(result)
-      assert length(result) > 0
+      assert result != []
     end
 
     test "groups panels on the same y-row into a single horizontal layout" do

@@ -1,11 +1,20 @@
 defmodule GrafExTerm.Screen.AddDashboardModal do
+  @moduledoc false
   use Drafter.Screen
 
-  alias GrafExTerm.Dashboard.Store
   alias Drafter.Widget.FilePicker
+  alias GrafExTerm.Dashboard.Store
 
   def mount(_props) do
-    %{uri: "", error: nil, loading: false, step: :uri_input, dashboard_uid: nil, datasource_vars: [], datasource_inputs: %{}}
+    %{
+      uri: "",
+      error: nil,
+      loading: false,
+      step: :uri_input,
+      dashboard_uid: nil,
+      datasource_vars: [],
+      datasource_inputs: %{}
+    }
   end
 
   def render(%{step: :uri_input} = state) do

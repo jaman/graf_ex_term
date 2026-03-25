@@ -1,17 +1,14 @@
 defmodule GrafExTerm.Panel.Timeseries do
+  @moduledoc false
   import Drafter.App, only: [chart: 2, placeholder: 1]
 
   @palette [
-    {255, 200,  50},
-    { 80, 220, 255},
-    {255,  80, 160},
-    { 80, 255, 130},
-    {200, 120, 255},
-    {255, 160,  60},
-    {100, 180, 200},
-    { 70, 130, 100},
-    {130, 100,  70},
-    { 80,  90, 130}
+    {100, 200, 255},
+    {255, 130, 80},
+    {80, 255, 150},
+    {255, 100, 180},
+    {200, 180, 60},
+    {180, 100, 255}
   ]
 
   @spec prepare(map(), {:ok, list()} | any()) :: {:prepared_ts, map()} | any()
@@ -21,14 +18,29 @@ defmodule GrafExTerm.Panel.Timeseries do
     sorted = sort_largest_first(scaled_series)
     values = extract_values(sorted)
     type = chart_type(panel)
-    baseline_opt = if type == :braille_area, do: [show_baseline: true], else: []
+
+    has_weights = Enum.any?(sorted, fn s -> Map.get(s, :weight, 1) > 1 end)
+    num_series = length(sorted)
+
+    braille_opts =
+      if type == :braille_area do
+        fill = cond do
+          has_weights -> 0.6
+          num_series > 3 -> 0.6
+          true -> 1.0
+        end
+
+        [show_baseline: true, fill_opacity: fill, zero_center: :independent]
+      else
+        []
+      end
 
     opts =
       [chart_type: type] ++
-      baseline_opt ++
-      [show_axes: true, title: panel.title, colors: @palette] ++
-      base_axis_opts(panel, unit) ++
-      unit_axis_opts
+        braille_opts ++
+        [show_axes: true, title: panel.title, colors: @palette] ++
+        base_axis_opts(panel, unit) ++
+        unit_axis_opts
 
     {:prepared_ts, %{values: values, opts: opts}}
   end
@@ -63,8 +75,17 @@ defmodule GrafExTerm.Panel.Timeseries do
     max = Map.get(defaults, "max")
 
     opts = []
-    opts = if is_number(min) and unit not in ["percentunit"], do: Keyword.put(opts, :min_value, min), else: opts
-    opts = if is_number(max) and unit not in ["percentunit"], do: Keyword.put(opts, :max_value, max), else: opts
+
+    opts =
+      if is_number(min) and unit not in ["percentunit"],
+        do: Keyword.put(opts, :min_value, min),
+        else: opts
+
+    opts =
+      if is_number(max) and unit not in ["percentunit"],
+        do: Keyword.put(opts, :max_value, max),
+        else: opts
+
     opts
   end
 
@@ -145,16 +166,15 @@ defmodule GrafExTerm.Panel.Timeseries do
   defp extract_values(series) do
     max_weight = series |> Enum.map(&Map.get(&1, :weight, 1)) |> Enum.max(fn -> 1 end) |> max(1)
     has_weights = max_weight > 1
+    Enum.map(series, &extract_series_values(&1, has_weights, max_weight))
+  end
 
-    Enum.map(series, fn s ->
-      weight = Map.get(s, :weight, 1)
-      normalized = min(1.0, weight / max_weight)
+  defp extract_series_values(s, true, max_weight) do
+    normalized = min(1.0, Map.get(s, :weight, 1) / max_weight)
+    Enum.map(s.values, fn {_ts, val} -> {val, normalized} end)
+  end
 
-      if has_weights do
-        Enum.map(s.values, fn {_ts, val} -> {val, normalized} end)
-      else
-        Enum.map(s.values, fn {_ts, val} -> val end)
-      end
-    end)
+  defp extract_series_values(s, false, _max_weight) do
+    Enum.map(s.values, fn {_ts, val} -> val end)
   end
 end

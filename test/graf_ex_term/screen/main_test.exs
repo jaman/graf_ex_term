@@ -1,7 +1,9 @@
 defmodule GrafExTerm.Screen.MainTest do
   use ExUnit.Case, async: false
 
+  alias Drafter.Test.HeadlessDriver
   alias GrafExTerm.Screen.Main
+  alias GrafExTerm.Test.Headless
 
   describe "mount/1" do
     test "initializes all required state keys" do
@@ -128,8 +130,8 @@ defmodule GrafExTerm.Screen.MainTest do
 
   describe "headless integration" do
     setup do
-      ctx = GrafExTerm.Test.Headless.start(Main, %{}, size: {200, 50})
-      on_exit(fn -> GrafExTerm.Test.Headless.stop(ctx) end)
+      ctx = Headless.start(Main, %{}, size: {200, 50})
+      on_exit(fn -> Headless.stop(ctx) end)
       %{ctx: ctx}
     end
 
@@ -168,7 +170,7 @@ defmodule GrafExTerm.Screen.MainTest do
     end
 
     test "screen adapts to a resize event", %{ctx: ctx} do
-      Drafter.Test.HeadlessDriver.set_size(220, 60)
+      HeadlessDriver.set_size(220, 60)
       Process.sleep(30)
       hierarchy = Drafter.Test.get_widget_hierarchy(ctx)
       assert hierarchy != nil

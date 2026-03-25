@@ -1,30 +1,36 @@
 defmodule GrafExTerm.Panel.Renderer do
+  @moduledoc false
   import Drafter.App, only: [collapsible: 3, label: 2, vertical: 2, placeholder: 1]
 
-  alias GrafExTerm.Panel.{Stat, Table, Row, Timeseries, Gauge, Bargauge}
+  alias GrafExTerm.Panel.{Bargauge, Gauge, Row, Stat, Table, Timeseries}
 
   def render(panel, data, column_visibility \\ %{}, table_layouts \\ %{}, table_expanded \\ true) do
     height_ratio = Application.get_env(:graf_ex_term, :height_ratio, 3)
     height = panel.grid_pos.h * height_ratio
+    render_panel(panel, data, height, column_visibility, table_layouts, table_expanded)
+  end
 
-    case panel.type do
-      "stat" -> Stat.render(panel, data, height)
-      "table" ->
-        inner = Table.render(panel, data, height, Map.get(column_visibility, panel.id), Map.get(table_layouts, panel.id))
-        collapsible(panel.title, [inner],
-          id: :"table_panel_#{panel.id}",
-          content_height: height,
-          expanded: table_expanded,
-          on_toggle: {:toggle_table_panel, panel.id}
-        )
-      "row" -> Row.render(panel, false)
-      "timeseries" -> Timeseries.render(panel, data, height)
-      "graph" -> Timeseries.render(panel, data, height)
-      "gauge" -> Gauge.render(panel, data, height)
-      "bargauge" -> Bargauge.render(panel, data, height)
-      "text" -> render_text(panel, height)
-      _ -> placeholder(label: "#{panel.type}: #{panel.title}", height: height)
-    end
+  defp render_panel(%{type: "stat"} = panel, data, height, _, _, _), do: Stat.render(panel, data, height)
+  defp render_panel(%{type: "row"} = panel, _, _, _, _, _), do: Row.render(panel, false)
+  defp render_panel(%{type: "timeseries"} = panel, data, height, _, _, _), do: Timeseries.render(panel, data, height)
+  defp render_panel(%{type: "graph"} = panel, data, height, _, _, _), do: Timeseries.render(panel, data, height)
+  defp render_panel(%{type: "gauge"} = panel, data, height, _, _, _), do: Gauge.render(panel, data, height)
+  defp render_panel(%{type: "bargauge"} = panel, data, height, _, _, _), do: Bargauge.render(panel, data, height)
+  defp render_panel(%{type: "text"} = panel, _, height, _, _, _), do: render_text(panel, height)
+
+  defp render_panel(%{type: "table"} = panel, data, height, column_visibility, table_layouts, table_expanded) do
+    inner = Table.render(panel, data, height, Map.get(column_visibility, panel.id), Map.get(table_layouts, panel.id))
+
+    collapsible(panel.title, [inner],
+      id: :"table_panel_#{panel.id}",
+      content_height: height,
+      expanded: table_expanded,
+      on_toggle: {:toggle_table_panel, panel.id}
+    )
+  end
+
+  defp render_panel(panel, _, height, _, _, _) do
+    placeholder(label: "#{panel.type}: #{panel.title}", height: height)
   end
 
   defp render_text(panel, height) do

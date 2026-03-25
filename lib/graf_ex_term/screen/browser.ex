@@ -1,4 +1,5 @@
 defmodule GrafExTerm.Screen.Browser do
+  @moduledoc false
   use Drafter.App
 
   def mount(_props) do
@@ -11,7 +12,10 @@ defmodule GrafExTerm.Screen.Browser do
 
     vertical([
       header("graf_ex_term  ▸  Dashboards"),
-      scrollable([radio_set(items, id: :dashboard_browser, on_change: :open_dashboard, height: length(items))], flex: 1),
+      scrollable(
+        [radio_set(items, id: :dashboard_browser, on_change: :open_dashboard, height: length(items))],
+        flex: 1
+      ),
       footer(
         bindings: [
           {"Enter", "open"},

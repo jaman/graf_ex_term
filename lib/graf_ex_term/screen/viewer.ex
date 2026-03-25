@@ -1,10 +1,11 @@
 defmodule GrafExTerm.Screen.Viewer do
+  @moduledoc false
   use Drafter.App
 
   alias GrafExTerm.Layout.GridMapper
-  alias GrafExTerm.Variable.Manager
-  alias GrafExTerm.Refresh.{Scheduler, DataCache}
   alias GrafExTerm.Panel.Table
+  alias GrafExTerm.Refresh.{DataCache, Scheduler}
+  alias GrafExTerm.Variable.Manager
 
   def mount(%{dashboard: dashboard}) do
     DynamicSupervisor.start_child(
@@ -46,7 +47,15 @@ defmodule GrafExTerm.Screen.Viewer do
       {:updated, %{panel_data: panel_data, version: version}} ->
         vars = fetch_vars(uid)
         prepared = prepare_panel_data(panel_data, state.dashboard.panels)
-        %{state | panel_data: panel_data, prepared_panel_data: prepared, variables: vars, loading: false, data_version: version}
+
+        %{
+          state
+          | panel_data: panel_data,
+            prepared_panel_data: prepared,
+            variables: vars,
+            loading: false,
+            data_version: version
+        }
     end
   end
 
@@ -169,11 +178,9 @@ defmodule GrafExTerm.Screen.Viewer do
   end
 
   defp fetch_vars(dashboard_uid) do
-    try do
-      Manager.get_values(dashboard_uid)
-    catch
-      _, _ -> %{}
-    end
+    Manager.get_values(dashboard_uid)
+  catch
+    _, _ -> %{}
   end
 
   defp stop_children(dashboard_uid) do

@@ -1,8 +1,11 @@
 defmodule GrafExTerm.Refresh.Scheduler do
+  @moduledoc false
   use GenServer
 
-  alias GrafExTerm.Variable.{Manager, Substitution}
+  alias GrafExTerm.Dashboard.Store
   alias GrafExTerm.Datasource.Prometheus
+  alias GrafExTerm.Refresh.DataCache
+  alias GrafExTerm.Variable.{Manager, Substitution}
 
   def start_link(dashboard) do
     name = {:via, Registry, {GrafExTerm.RefreshRegistry, dashboard.uid}}
@@ -61,7 +64,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
   defp fetch_and_broadcast(dashboard, collapsed_rows) do
     user_vars = fetch_vars(dashboard.uid)
     app_datasources = Application.get_env(:graf_ex_term, :datasources, %{})
-    stored_datasource_map = GrafExTerm.Dashboard.Store.get_datasource_map(dashboard.uid)
+    stored_datasource_map = Store.get_datasource_map(dashboard.uid)
     now = System.system_time(:second)
     time_range = Application.get_env(:graf_ex_term, :time_range_seconds, 3600)
     resolution = Application.get_env(:graf_ex_term, :chart_resolution, 300)
@@ -81,7 +84,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
       end)
       |> Map.new()
 
-    GrafExTerm.Refresh.DataCache.put(dashboard.uid, panel_data)
+    DataCache.put(dashboard.uid, panel_data)
 
     Phoenix.PubSub.broadcast(
       GrafExTerm.PubSub,
@@ -93,23 +96,21 @@ defmodule GrafExTerm.Refresh.Scheduler do
   defp active_panel_ids(panels, collapsed_rows) do
     panels
     |> Enum.sort_by(fn p -> {p.grid_pos.y, p.grid_pos.x} end)
-    |> Enum.reduce({MapSet.new(), false}, fn panel, {acc, in_collapsed} ->
-      case panel.type do
-        "row" ->
-          {acc, MapSet.member?(collapsed_rows, panel.id)}
-        _ ->
-          if in_collapsed, do: {acc, true}, else: {MapSet.put(acc, panel.id), false}
-      end
-    end)
+    |> Enum.reduce({MapSet.new(), false}, &classify_panel(&1, &2, collapsed_rows))
     |> elem(0)
   end
 
+  defp classify_panel(%{type: "row"} = panel, {acc, _}, collapsed_rows) do
+    {acc, MapSet.member?(collapsed_rows, panel.id)}
+  end
+
+  defp classify_panel(_panel, {acc, true}, _collapsed_rows), do: {acc, true}
+  defp classify_panel(panel, {acc, false}, _collapsed_rows), do: {MapSet.put(acc, panel.id), false}
+
   defp fetch_vars(dashboard_uid) do
-    try do
-      Manager.get_values(dashboard_uid)
-    catch
-      _, _ -> %{}
-    end
+    Manager.get_values(dashboard_uid)
+  catch
+    _, _ -> %{}
   end
 
   defp fetch_panel_data(panel, vars, app_datasources, stored_datasource_map, from, to, step) do
@@ -132,16 +133,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
     results =
       panel.targets
       |> Enum.map(fn target ->
-        expr = Substitution.substitute(target.expr, vars)
-        config = resolve_datasource(target.datasource_ref, vars, app_datasources, stored_datasource_map)
-
-        case Prometheus.query(config, expr, {from, to}, step) do
-          {:ok, series} ->
-            named = Enum.map(series, fn s -> Map.put(s, :name, format_series_name(target.legend_format, s.labels)) end)
-            {:ok, apply_series_overrides(named, overrides)}
-          error ->
-            error
-        end
+        fetch_target_series(target, vars, app_datasources, stored_datasource_map, from, to, step, overrides)
       end)
 
     successful = Enum.filter(results, fn
@@ -154,6 +146,20 @@ defmodule GrafExTerm.Refresh.Scheduler do
     else
       all_series = Enum.flat_map(successful, fn {:ok, series} -> series end)
       {:ok, all_series}
+    end
+  end
+
+  defp fetch_target_series(target, vars, app_datasources, stored_datasource_map, from, to, step, overrides) do
+    expr = Substitution.substitute(target.expr, vars)
+    config = resolve_datasource(target.datasource_ref, vars, app_datasources, stored_datasource_map)
+
+    case Prometheus.query(config, expr, {from, to}, step) do
+      {:ok, series} ->
+        named = Enum.map(series, fn s -> Map.put(s, :name, format_series_name(target.legend_format, s.labels)) end)
+        {:ok, apply_series_overrides(named, overrides)}
+
+      error ->
+        error
     end
   end
 
@@ -174,34 +180,39 @@ defmodule GrafExTerm.Refresh.Scheduler do
   end
 
   defp apply_series_overrides(series, overrides) do
-    negative_matchers = Enum.flat_map(overrides, fn override ->
-      has_negative_y = Enum.any?(override["properties"] || [], fn p ->
-        p["id"] == "custom.transform" and p["value"] == "negative-Y"
-      end)
-
-      if has_negative_y do
-        case get_in(override, ["matcher", "id"]) do
-          "byName" -> [{:exact, get_in(override, ["matcher", "options"])}]
-          "byRegexp" ->
-            pattern = get_in(override, ["matcher", "options"])
-            [{:regex, Regex.compile!(String.slice(pattern, 1..-2//1))}]
-          _ -> []
-        end
-      else
-        []
-      end
-    end)
+    negative_matchers = Enum.flat_map(overrides, &extract_negative_matcher/1)
 
     if Enum.empty?(negative_matchers) do
       series
     else
-      Enum.map(series, fn s ->
-        if matches_any?(s.name, negative_matchers) do
-          %{s | values: Enum.map(s.values, fn {ts, v} -> {ts, -v} end)}
-        else
-          s
-        end
+      Enum.map(series, &maybe_negate_series(&1, negative_matchers))
+    end
+  end
+
+  defp maybe_negate_series(s, matchers) do
+    if matches_any?(s.name, matchers) do
+      %{s | values: Enum.map(s.values, fn {ts, v} -> {ts, -v} end)}
+    else
+      s
+    end
+  end
+
+  defp extract_negative_matcher(override) do
+    has_negative_y =
+      Enum.any?(override["properties"] || [], fn p ->
+        p["id"] == "custom.transform" and p["value"] == "negative-Y"
       end)
+
+    if has_negative_y do
+      case get_in(override, ["matcher", "id"]) do
+        "byName" -> [{:exact, get_in(override, ["matcher", "options"])}]
+        "byRegexp" ->
+          pattern = get_in(override, ["matcher", "options"])
+          [{:regex, Regex.compile!(String.slice(pattern, 1..-2//1))}]
+        _ -> []
+      end
+    else
+      []
     end
   end
 
@@ -236,13 +247,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
 
     row_map =
       Enum.reduce(target_results, %{}, fn {target, {:ok, results}}, acc ->
-        col = col_name(target, multi)
-
-        Enum.reduce(results, acc, fn %{labels: labels, value: val}, row_acc ->
-          Map.update(row_acc, labels, %{col => val, :_labels => labels}, fn row ->
-            Map.put(row, col, val)
-          end)
-        end)
+        merge_target_results(acc, target, results, multi)
       end)
 
     rows = Map.values(row_map)
@@ -250,34 +255,50 @@ defmodule GrafExTerm.Refresh.Scheduler do
     if Enum.empty?(rows) do
       {:error, :no_data}
     else
-      col_names = Enum.map(target_results, fn {target, _} -> col_name(target, multi) end)
-      first_labels = hd(rows)[:_labels]
-      label_keys = first_labels |> Map.keys() |> Enum.sort()
-
-      label_cols =
-        Enum.map(label_keys, fn k ->
-          %{key: String.to_atom(k), label: String.capitalize(k), width: :auto}
-        end)
-
-      value_cols =
-        Enum.map(col_names, fn name ->
-          %{key: String.to_atom(name), label: name, width: 10}
-        end)
-
-      columns = label_cols ++ value_cols
-
-      formatted_rows =
-        Enum.map(rows, fn row ->
-          label_fields = Map.new(row[:_labels], fn {k, v} -> {String.to_atom(k), v} end)
-          value_fields = Map.new(col_names, fn name ->
-            val = Map.get(row, name)
-            {String.to_atom(name), if(is_float(val), do: Float.round(val, 2), else: val)}
-          end)
-          Map.merge(label_fields, value_fields)
-        end)
-
-      {:table, columns, formatted_rows}
+      build_instant_table(target_results, rows, multi)
     end
+  end
+
+  defp merge_target_results(acc, target, results, multi) do
+    col = col_name(target, multi)
+
+    Enum.reduce(results, acc, fn %{labels: labels, value: val}, row_acc ->
+      Map.update(row_acc, labels, %{col => val, :_labels => labels}, fn row ->
+        Map.put(row, col, val)
+      end)
+    end)
+  end
+
+  defp build_instant_table(target_results, rows, multi) do
+    col_names = Enum.map(target_results, fn {target, _} -> col_name(target, multi) end)
+    first_labels = hd(rows)[:_labels]
+    label_keys = first_labels |> Map.keys() |> Enum.sort()
+
+    label_cols =
+      Enum.map(label_keys, fn k ->
+        %{key: String.to_atom(k), label: String.capitalize(k), width: :auto}
+      end)
+
+    value_cols =
+      Enum.map(col_names, fn name ->
+        %{key: String.to_atom(name), label: name, width: 10}
+      end)
+
+    columns = label_cols ++ value_cols
+    formatted_rows = Enum.map(rows, &format_instant_row(&1, col_names))
+    {:table, columns, formatted_rows}
+  end
+
+  defp format_instant_row(row, col_names) do
+    label_fields = Map.new(row[:_labels], fn {k, v} -> {String.to_atom(k), v} end)
+
+    value_fields =
+      Map.new(col_names, fn name ->
+        val = Map.get(row, name)
+        {String.to_atom(name), if(is_float(val), do: Float.round(val, 2), else: val)}
+      end)
+
+    Map.merge(label_fields, value_fields)
   end
 
   defp col_name(%{legend_format: lf}, _multi) when is_binary(lf) and lf != "", do: lf
@@ -300,19 +321,25 @@ defmodule GrafExTerm.Refresh.Scheduler do
         %{url: Map.get(stored_datasource_map, resolved)}
 
       Regex.match?(~r/^\$\{?(\w+)\}?$/, resolved) ->
-        case Regex.run(~r/^\$\{?(\w+)\}?$/, resolved) do
-          [_, var_name] ->
-            case Map.get(stored_datasource_map, var_name) do
-              nil -> default_datasource(app_datasources)
-              url -> %{url: url}
-            end
-          _ -> default_datasource(app_datasources)
-        end
+        resolve_variable_datasource(resolved, app_datasources, stored_datasource_map)
 
       Map.has_key?(app_datasources, resolved) ->
         Map.get(app_datasources, resolved)
 
       true ->
+        default_datasource(app_datasources)
+    end
+  end
+
+  defp resolve_variable_datasource(resolved, app_datasources, stored_datasource_map) do
+    case Regex.run(~r/^\$\{?(\w+)\}?$/, resolved) do
+      [_, var_name] ->
+        case Map.get(stored_datasource_map, var_name) do
+          nil -> default_datasource(app_datasources)
+          url -> %{url: url}
+        end
+
+      _ ->
         default_datasource(app_datasources)
     end
   end
