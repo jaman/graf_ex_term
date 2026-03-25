@@ -143,8 +143,18 @@ defmodule GrafExTerm.Panel.Timeseries do
   defp extract_values([]), do: []
 
   defp extract_values(series) do
+    max_weight = series |> Enum.map(&Map.get(&1, :weight, 1)) |> Enum.max(fn -> 1 end) |> max(1)
+    has_weights = max_weight > 1
+
     Enum.map(series, fn s ->
-      Enum.map(s.values, fn {_ts, val} -> val end)
+      weight = Map.get(s, :weight, 1)
+      normalized = min(1.0, weight / max_weight)
+
+      if has_weights do
+        Enum.map(s.values, fn {_ts, val} -> {val, normalized} end)
+      else
+        Enum.map(s.values, fn {_ts, val} -> val end)
+      end
     end)
   end
 end

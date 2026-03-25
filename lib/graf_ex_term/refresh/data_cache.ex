@@ -32,8 +32,12 @@ defmodule GrafExTerm.Refresh.DataCache do
     {:noreply, Map.put(state, uid, entry)}
   end
 
+  alias GrafExTerm.Refresh.SeriesClusterer
+
   defp downsample_panel({:ok, series}) do
-    {:ok, Enum.map(series, fn s -> %{s | values: downsample_values(s.values)} end)}
+    downsampled = Enum.map(series, fn s -> %{s | values: downsample_values(s.values)} end)
+    clustered = SeriesClusterer.cluster(downsampled)
+    {:ok, clustered}
   end
 
   defp downsample_panel(other), do: other
