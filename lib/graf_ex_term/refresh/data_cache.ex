@@ -22,7 +22,7 @@ defmodule GrafExTerm.Refresh.DataCache do
     {:ok, state}
   end
 
-  @max_points_per_series 400
+  @max_points_per_series 200
 
   @impl GenServer
   def handle_cast({:put, uid, panel_data}, state) do
