@@ -14,24 +14,34 @@ defmodule GrafExTerm.Panel.Timeseries do
     { 80,  90, 130}
   ]
 
-
-  def render(panel, {:ok, series}, height) do
+  @spec prepare(map(), {:ok, list()} | any()) :: {:prepared_ts, map()} | any()
+  def prepare(panel, {:ok, series}) do
     unit = get_in(panel.field_config, ["defaults", "unit"]) || ""
     {scaled_series, unit_axis_opts} = scale_for_unit(series, unit)
     sorted = sort_largest_first(scaled_series)
-    values = series_to_values(sorted)
+    values = extract_values(sorted)
     type = chart_type(panel)
-
     baseline_opt = if type == :braille_area, do: [show_baseline: true], else: []
 
     opts =
-      [id: :"chart_#{panel.id}", chart_type: type] ++
+      [chart_type: type] ++
       baseline_opt ++
-      [show_axes: true, title: panel.title, colors: @palette, height: height] ++
+      [show_axes: true, title: panel.title, colors: @palette] ++
       base_axis_opts(panel, unit) ++
       unit_axis_opts
 
-    chart(values, opts)
+    {:prepared_ts, %{values: values, opts: opts}}
+  end
+
+  def prepare(_panel, other), do: other
+
+  def render(panel, {:prepared_ts, %{values: values, opts: opts}}, height) do
+    chart(values, [{:id, :"chart_#{panel.id}"}, {:height, height} | opts])
+  end
+
+  def render(panel, {:ok, series}, height) do
+    prepared = prepare(panel, {:ok, series})
+    render(panel, prepared, height)
   end
 
   def render(_panel, _, height) do
@@ -90,6 +100,7 @@ defmodule GrafExTerm.Panel.Timeseries do
   end
 
   defp peak_value([]), do: 0.0
+
   defp peak_value(series) do
     series
     |> Enum.flat_map(fn s -> Enum.map(s.values, fn {_ts, v} -> abs(v) end) end)
@@ -108,6 +119,7 @@ defmodule GrafExTerm.Panel.Timeseries do
 
   defp si_labels(peak, suffix) do
     step = Float.round(peak / 4, 1)
+
     if step > 0 do
       Enum.map(0..4, fn i -> "#{Float.round(i * step, 1)} #{suffix}" end)
     else
@@ -128,9 +140,9 @@ defmodule GrafExTerm.Panel.Timeseries do
     sum / length(values)
   end
 
-  defp series_to_values([]), do: []
+  defp extract_values([]), do: []
 
-  defp series_to_values(series) do
+  defp extract_values(series) do
     Enum.map(series, fn s ->
       Enum.map(s.values, fn {_ts, val} -> val end)
     end)

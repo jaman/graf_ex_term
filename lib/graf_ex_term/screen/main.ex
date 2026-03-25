@@ -6,7 +6,7 @@ defmodule GrafExTerm.Screen.Main do
   alias GrafExTerm.Layout.GridMapper
   alias GrafExTerm.Variable.Manager
   alias GrafExTerm.Refresh.{Scheduler, DataCache}
-  alias GrafExTerm.Panel.Table
+  alias GrafExTerm.Panel.{Table, Timeseries}
 
   def mount(_props) do
     %{
@@ -204,13 +204,13 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   def handle_event({:table_row_selected, _panel_id}, [], state) do
-    prepared = refilter_series(state.prepared_panel_data, state.panel_data, nil)
+    prepared = refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, nil)
     {:noreply, %{state | prepared_panel_data: prepared, row_filter: nil}}
   end
 
   def handle_event({:table_row_selected, _panel_id}, rows, state) do
     filter = extract_label_filter(rows)
-    prepared = refilter_series(state.prepared_panel_data, state.panel_data, filter)
+    prepared = refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, filter)
     {:noreply, %{state | prepared_panel_data: prepared, row_filter: filter}}
   end
 
@@ -332,27 +332,31 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   defp prepare_panel_data(panel_data, panels, row_filter, collapsed_rows) do
-    table_panels =
-      panels
-      |> Enum.filter(fn p -> p.type == "table" end)
-      |> Map.new(fn p -> {p.id, p} end)
-
+    panel_map = Map.new(panels, fn p -> {p.id, p} end)
     active_ids = active_panel_ids(panels, collapsed_rows)
 
     Map.new(panel_data, fn {panel_id, data} ->
       if not MapSet.member?(active_ids, panel_id) do
         {panel_id, data}
       else
-        case Map.get(table_panels, panel_id) do
-          nil ->
-            {panel_id, apply_row_filter(data, row_filter)}
-
-          panel ->
-            {rows, cols} = Table.prepare(data, panel.organize, panel.field_config)
-            {panel_id, {:prepared, rows, cols}}
-        end
+        panel = Map.get(panel_map, panel_id)
+        {panel_id, prepare_single_panel(panel, data, row_filter)}
       end
     end)
+  end
+
+  defp prepare_single_panel(%{type: "table"} = panel, data, _row_filter) do
+    {rows, cols} = Table.prepare(data, panel.organize, panel.field_config)
+    {:prepared, rows, cols}
+  end
+
+  defp prepare_single_panel(%{type: type} = panel, data, row_filter) when type in ["timeseries", "graph"] do
+    filtered = apply_row_filter(data, row_filter)
+    Timeseries.prepare(panel, filtered)
+  end
+
+  defp prepare_single_panel(_panel, data, row_filter) do
+    apply_row_filter(data, row_filter)
   end
 
   defp active_panel_ids(panels, collapsed_rows) do
@@ -367,7 +371,9 @@ defmodule GrafExTerm.Screen.Main do
     |> elem(0)
   end
 
-  defp refilter_series(prepared, raw_panel_data, filter) do
+  defp refilter_series(prepared, raw_panel_data, panels, filter) do
+    panel_map = Map.new(panels, fn p -> {p.id, p} end)
+
     Map.new(prepared, fn {panel_id, value} ->
       case value do
         {:prepared, _, _} ->
@@ -375,7 +381,8 @@ defmodule GrafExTerm.Screen.Main do
 
         _ ->
           raw = Map.get(raw_panel_data, panel_id, {:error, :no_data})
-          {panel_id, apply_row_filter(raw, filter)}
+          panel = Map.get(panel_map, panel_id)
+          {panel_id, prepare_single_panel(panel, raw, filter)}
       end
     end)
   end
