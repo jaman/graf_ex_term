@@ -44,7 +44,9 @@ defmodule GrafExTerm.Screen.Main do
 
   def on_timer(:data_ready, %{scrolling: true} = state) do
     case DataCache.take_if_updated(state.selected_uid, state.data_version) do
-      :unchanged -> state
+      :unchanged ->
+        state
+
       {:updated, %{panel_data: panel_data, version: version}} ->
         %{state | pending_data: {panel_data, version}}
     end
@@ -52,11 +54,28 @@ defmodule GrafExTerm.Screen.Main do
 
   def on_timer(:data_ready, state) do
     case DataCache.take_if_updated(state.selected_uid, state.data_version) do
-      :unchanged -> state
+      :unchanged ->
+        state
+
       {:updated, %{panel_data: panel_data, version: version}} ->
         vars = fetch_vars(state.selected_uid)
-        prepared = prepare_panel_data(panel_data, state.selected_panels, state.row_filter, state.collapsed_rows)
-        %{state | panel_data: panel_data, prepared_panel_data: prepared, variables: vars, loading: false, data_version: version}
+
+        prepared =
+          prepare_panel_data(
+            panel_data,
+            state.selected_panels,
+            state.row_filter,
+            state.collapsed_rows
+          )
+
+        %{
+          state
+          | panel_data: panel_data,
+            prepared_panel_data: prepared,
+            variables: vars,
+            loading: false,
+            data_version: version
+        }
     end
   end
 
@@ -68,8 +87,25 @@ defmodule GrafExTerm.Screen.Main do
 
   def on_scroll_idle(%{pending_data: {panel_data, version}} = state) do
     vars = fetch_vars(state.selected_uid)
-    prepared = prepare_panel_data(panel_data, state.selected_panels, state.row_filter, state.collapsed_rows)
-    %{state | scrolling: false, pending_data: nil, panel_data: panel_data, prepared_panel_data: prepared, variables: vars, loading: false, data_version: version}
+
+    prepared =
+      prepare_panel_data(
+        panel_data,
+        state.selected_panels,
+        state.row_filter,
+        state.collapsed_rows
+      )
+
+    %{
+      state
+      | scrolling: false,
+        pending_data: nil,
+        panel_data: panel_data,
+        prepared_panel_data: prepared,
+        variables: vars,
+        loading: false,
+        data_version: version
+    }
   end
 
   defp unsubscribe(nil), do: :ok
@@ -98,7 +134,20 @@ defmodule GrafExTerm.Screen.Main do
   def handle_event(:select_dashboard, nil, state) do
     stop_active_children(state.selected_uid)
     unsubscribe(state.selected_uid)
-    {:ok, %{state | selected_uid: nil, selected_panels: [], panel_data: %{}, prepared_panel_data: %{}, loading: false, row_filter: nil, table_layouts: %{}, scrolling: false, pending_data: nil}}
+
+    {:ok,
+     %{
+       state
+       | selected_uid: nil,
+         selected_panels: [],
+         panel_data: %{},
+         prepared_panel_data: %{},
+         loading: false,
+         row_filter: nil,
+         table_layouts: %{},
+         scrolling: false,
+         pending_data: nil
+     }}
   end
 
   def handle_event(:select_dashboard, uid, state) do
@@ -190,6 +239,7 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   def handle_event({:key, :r}, %{selected_uid: nil} = state), do: {:noreply, state}
+
   def handle_event({:key, :r}, state) do
     Scheduler.refresh_now(state.selected_uid)
     {:noreply, %{state | loading: true}}
@@ -229,7 +279,14 @@ defmodule GrafExTerm.Screen.Main do
   defp right_panel_items(state) do
     case Store.get_dashboard(state.selected_uid) do
       {:ok, dashboard} ->
-        GridMapper.to_tui_layout(dashboard.panels, state.prepared_panel_data, state.variables, state.column_visibility, state.collapsed_rows, state.table_layouts)
+        GridMapper.to_tui_layout(
+          dashboard.panels,
+          state.prepared_panel_data,
+          state.variables,
+          state.column_visibility,
+          state.collapsed_rows,
+          state.table_layouts
+        )
 
       {:error, _} ->
         [label("Dashboard unavailable", class: :error)]
@@ -253,7 +310,6 @@ defmodule GrafExTerm.Screen.Main do
       [{pid, _}] -> DynamicSupervisor.terminate_child(GrafExTerm.VarSupervisor, pid)
       _ -> :ok
     end
-
   end
 
   defp initial_variables(dashboard) do
@@ -269,7 +325,9 @@ defmodule GrafExTerm.Screen.Main do
           {:prepared, _, all_cols} -> MapSet.new(all_cols, fn c -> c.key end)
           _ -> MapSet.new()
         end
-      existing -> existing
+
+      existing ->
+        existing
     end
   end
 
@@ -288,6 +346,7 @@ defmodule GrafExTerm.Screen.Main do
         case Map.get(table_panels, panel_id) do
           nil ->
             {panel_id, apply_row_filter(data, row_filter)}
+
           panel ->
             {rows, cols} = Table.prepare(data, panel.organize, panel.field_config)
             {panel_id, {:prepared, rows, cols}}
@@ -313,6 +372,7 @@ defmodule GrafExTerm.Screen.Main do
       case value do
         {:prepared, _, _} ->
           {panel_id, value}
+
         _ ->
           raw = Map.get(raw_panel_data, panel_id, {:error, :no_data})
           {panel_id, apply_row_filter(raw, filter)}
@@ -331,6 +391,7 @@ defmodule GrafExTerm.Screen.Main do
           end)
         end)
       end)
+
     {:ok, filtered}
   end
 

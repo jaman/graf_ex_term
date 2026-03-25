@@ -33,38 +33,43 @@ defmodule GrafExTerm.Layout.GridMapper do
 
   defp build_section_widgets({row_panel, panels}, panel_data, height_ratio, column_visibility, collapsed_rows, table_layouts, collapsed_table_panels, all_tables_collapsed) do
     collapsed = MapSet.member?(collapsed_rows, row_panel.id)
-    row_widget = Row.render(row_panel, collapsed, length(panels))
-
-    if collapsed do
-      [row_widget]
-    else
-      [row_widget | build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed)]
-    end
+    {children, content_height} = build_panel_row_widgets_with_height(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed)
+    [Row.render(row_panel, collapsed, length(panels), children, content_height)]
   end
 
   defp build_panel_row_widgets([], _panel_data, _height_ratio, _column_visibility, _table_layouts, _collapsed_table_panels, _all_tables_collapsed), do: []
 
   defp build_panel_row_widgets(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed) do
-    panels
-    |> Enum.sort_by(fn p -> p.grid_pos.x end)
-    |> Enum.group_by(fn p -> p.grid_pos.y end)
-    |> Enum.sort_by(fn {y, _} -> y end)
-    |> Enum.map(fn {_, row_panels} ->
-      row_height =
-        row_panels
-        |> Enum.map(fn p -> p.grid_pos.h end)
-        |> Enum.max(fn -> 8 end)
-        |> Kernel.*(height_ratio)
+    {widgets, _} = build_panel_row_widgets_with_height(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed)
+    widgets
+  end
 
-      widgets =
-        Enum.map(row_panels, fn panel ->
-          data = Map.get(panel_data, panel.id, {:error, :no_data})
-          table_expanded = not (all_tables_collapsed or MapSet.member?(collapsed_table_panels, panel.id))
-          widget = Renderer.render(panel, data, column_visibility, table_layouts, table_expanded)
-          vertical([widget], colspan: panel.grid_pos.w)
-        end)
+  defp build_panel_row_widgets_with_height([], _panel_data, _height_ratio, _column_visibility, _table_layouts, _collapsed_table_panels, _all_tables_collapsed), do: {[], 0}
 
-      horizontal(widgets, gap: 1, height: row_height)
-    end)
+  defp build_panel_row_widgets_with_height(panels, panel_data, height_ratio, column_visibility, table_layouts, collapsed_table_panels, all_tables_collapsed) do
+    rows =
+      panels
+      |> Enum.sort_by(fn p -> p.grid_pos.x end)
+      |> Enum.group_by(fn p -> p.grid_pos.y end)
+      |> Enum.sort_by(fn {y, _} -> y end)
+      |> Enum.map(fn {_, row_panels} ->
+        row_height =
+          row_panels
+          |> Enum.map(fn p -> p.grid_pos.h end)
+          |> Enum.max(fn -> 8 end)
+          |> Kernel.*(height_ratio)
+
+        widgets =
+          Enum.map(row_panels, fn panel ->
+            data = Map.get(panel_data, panel.id, {:error, :no_data})
+            table_expanded = not (all_tables_collapsed or MapSet.member?(collapsed_table_panels, panel.id))
+            widget = Renderer.render(panel, data, column_visibility, table_layouts, table_expanded)
+            vertical([widget], colspan: panel.grid_pos.w)
+          end)
+
+        {horizontal(widgets, gap: 1, height: row_height), row_height}
+      end)
+
+    {Enum.map(rows, &elem(&1, 0)), rows |> Enum.map(&elem(&1, 1)) |> Enum.sum()}
   end
 end

@@ -9,7 +9,8 @@ defmodule GrafExTerm.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
-      description: "Terminal UI for Grafana dashboards — live Prometheus queries rendered as interactive TUI panels",
+      description:
+        "Terminal UI for Grafana dashboards — live Prometheus queries rendered as interactive TUI panels",
       package: package(),
       docs: docs(),
       source_url: "https://github.com/your-org/graf_ex_term",
@@ -34,6 +35,7 @@ defmodule GrafExTerm.MixProject do
       {:jason, "~> 1.4"},
       {:phoenix_pubsub, "~> 2.1"},
       {:cachex, "~> 3.6"},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end

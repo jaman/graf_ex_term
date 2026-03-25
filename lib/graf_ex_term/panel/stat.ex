@@ -1,10 +1,52 @@
 defmodule GrafExTerm.Panel.Stat do
-  import Drafter.App, only: [vertical: 2, label: 2, digits: 2, placeholder: 1]
+  import Drafter.App, only: [vertical: 2, horizontal: 2, label: 2, digits: 2, switch: 1, placeholder: 1]
 
   alias Drafter.Format
   alias GrafExTerm.Panel.ColorRules
 
   def render(panel, {:ok, series}, height) do
+    case boolean_mappings(panel.field_config) do
+      {:boolean, on_text, off_text, on_color, off_color} ->
+        render_boolean(panel, series, height, on_text, off_text, on_color, off_color)
+
+      :not_boolean ->
+        render_numeric(panel, series, height)
+    end
+  end
+
+  def render(panel, _, _height) do
+    vertical([
+      label(panel.title, style: %{bold: true}),
+      placeholder(label: "No data")
+    ], [])
+  end
+
+  defp render_boolean(panel, series, height, on_text, off_text, on_color, off_color) do
+    switches =
+      Enum.map(series, fn s ->
+        value = last_value(s.values)
+        is_on = value >= 1.0
+        series_label = series_display_name(s, panel.title)
+        text = if is_on, do: on_text, else: off_text
+
+        horizontal([
+          switch(
+            enabled: is_on,
+            label: "#{series_label}: #{text}",
+            size: :compact,
+            on_color: on_color,
+            off_color: off_color
+          )
+        ], [])
+      end)
+
+    vertical(
+      [label(panel.title, style: %{bold: true}) | switches],
+      height: height
+    )
+  end
+
+  defp render_numeric(panel, series, height) do
     value = extract_last_value(series)
     unit = get_in(panel.field_config, ["defaults", "unit"]) || ""
     formatted = format_value(value, unit)
@@ -23,13 +65,6 @@ defmodule GrafExTerm.Panel.Stat do
     vertical([
       label(panel.title, style: %{bold: true}),
       digits(formatted, digit_opts)
-    ], height: height)
-  end
-
-  def render(panel, _, height) do
-    vertical([
-      label(panel.title, style: %{bold: true}),
-      placeholder(label: "No data", height: height - 1)
     ], height: height)
   end
 
@@ -62,6 +97,8 @@ defmodule GrafExTerm.Panel.Stat do
     {if(is_number(min), do: min, else: 0), if(is_number(max), do: max, else: nil)}
   end
 
+  defp format_value(value, _unit) when not is_number(value), do: to_string(value)
+
   defp format_value(value, unit) when is_number(value) do
     case unit do
       "percent" -> Format.percent(value, decimals: 1)
@@ -87,7 +124,97 @@ defmodule GrafExTerm.Panel.Stat do
     end
   end
 
-  defp format_value(value, _unit), do: to_string(value)
+  defp last_value([]), do: 0.0
+  defp last_value(values), do: values |> List.last() |> elem(1)
+
+  defp series_display_name(s, fallback) do
+    case Map.get(s, :name) do
+      name when is_binary(name) and name != "" -> name
+      _ -> fallback
+    end
+  end
+
+  @boolean_pairs MapSet.new([
+    {"true", "false"},
+    {"yes", "no"},
+    {"on", "off"},
+    {"up", "down"},
+    {"enabled", "disabled"},
+    {"active", "inactive"},
+    {"1", "0"}
+  ])
+
+  defp boolean_mappings(field_config) do
+    mappings = get_in(field_config, ["defaults", "mappings"]) || []
+
+    text_map =
+      Enum.reduce(mappings, %{}, fn mapping, acc ->
+        case Map.get(mapping, "type") do
+          "value" ->
+            options = Map.get(mapping, "options", %{})
+
+            Enum.reduce(options, acc, fn {key, config}, inner_acc ->
+              case Map.get(config, "text") do
+                text when is_binary(text) ->
+                  color = Map.get(config, "color")
+                  Map.put(inner_acc, key, {text, color})
+
+                _ ->
+                  inner_acc
+              end
+            end)
+
+          type when type in [1, 2] ->
+            val = to_string(Map.get(mapping, "value", ""))
+            text = Map.get(mapping, "text")
+
+            if is_binary(text) and val != "" do
+              Map.put(acc, val, {text, Map.get(mapping, "color")})
+            else
+              acc
+            end
+
+          _ ->
+            acc
+        end
+      end)
+
+    case Map.keys(text_map) do
+      keys when length(keys) == 2 ->
+        [{_k1, {t1, c1}}, {k2, {t2, c2}}] = Enum.sort_by(text_map, fn {k, _} -> k end)
+        pair = {String.downcase(t1), String.downcase(t2)}
+        reverse_pair = {String.downcase(t2), String.downcase(t1)}
+
+        cond do
+          MapSet.member?(@boolean_pairs, pair) ->
+            {on_text, on_color} = if truthy_key?(k2), do: {t2, resolve_color(c2)}, else: {t1, resolve_color(c1)}
+            {off_text, off_color} = if truthy_key?(k2), do: {t1, resolve_color(c1)}, else: {t2, resolve_color(c2)}
+            {:boolean, on_text, off_text, on_color, off_color}
+
+          MapSet.member?(@boolean_pairs, reverse_pair) ->
+            {on_text, on_color} = if truthy_key?(k2), do: {t2, resolve_color(c2)}, else: {t1, resolve_color(c1)}
+            {off_text, off_color} = if truthy_key?(k2), do: {t1, resolve_color(c1)}, else: {t2, resolve_color(c2)}
+            {:boolean, on_text, off_text, on_color, off_color}
+
+          true ->
+            :not_boolean
+        end
+
+      _ ->
+        :not_boolean
+    end
+  end
+
+  defp truthy_key?("1"), do: true
+
+  defp truthy_key?(k) do
+    String.to_float(k) >= 1.0
+  rescue
+    _ -> false
+  end
+
+  defp resolve_color(nil), do: nil
+  defp resolve_color(color), do: ColorRules.resolve_named_color(color)
 
   defp threshold_color(field_config, value) do
     steps =

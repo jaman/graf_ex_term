@@ -2,6 +2,7 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
   use Drafter.Screen
 
   alias GrafExTerm.Dashboard.Store
+  alias Drafter.Widget.FilePicker
 
   def mount(_props) do
     %{uri: "", error: nil, loading: false, step: :uri_input, dashboard_uid: nil, datasource_vars: [], datasource_inputs: %{}}
@@ -10,11 +11,12 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
   def render(%{step: :uri_input} = state) do
     vertical(
       [
-        label("Enter a dashboard URI:"),
+        label("Enter a dashboard URI or browse for a file:"),
         label("  file:///path/to/dashboard.json", class: :muted),
         label("  http://grafana:3000/api/dashboards/uid/abc", class: :muted),
         label(""),
         text_input(
+          value: state.uri,
           placeholder: "URI...",
           on_change: :uri_changed,
           on_submit: :confirm
@@ -29,6 +31,7 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
         horizontal(
           [
             button("Add", on_click: :confirm, variant: :primary),
+            button("Browse...", on_click: :browse_file),
             button("Cancel", on_click: :cancel)
           ],
           gap: 2
@@ -76,6 +79,23 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
 
   def handle_event(:uri_changed, {uri, _}, state) do
     {:ok, %{state | uri: uri, error: nil}}
+  end
+
+  def handle_event(:browse_file, _data, _state) do
+    FilePicker.show(
+      on_select: :file_picked,
+      on_cancel: :browse_cancelled,
+      filter: [".json"],
+      title: "Open Dashboard JSON"
+    )
+  end
+
+  def handle_event(:file_picked, path, state) do
+    {:ok, %{state | uri: "file://#{path}", error: nil}}
+  end
+
+  def handle_event(:browse_cancelled, _data, state) do
+    {:noreply, state}
   end
 
   def handle_event(:confirm, _data, state) do

@@ -1,5 +1,5 @@
 defmodule GrafExTerm.Panel.Renderer do
-  import Drafter.App, only: [collapsible: 3]
+  import Drafter.App, only: [collapsible: 3, label: 2, vertical: 2, placeholder: 1]
 
   alias GrafExTerm.Panel.{Stat, Table, Row, Timeseries, Gauge, Bargauge}
 
@@ -22,12 +22,14 @@ defmodule GrafExTerm.Panel.Renderer do
       "graph" -> Timeseries.render(panel, data, height)
       "gauge" -> Gauge.render(panel, data, height)
       "bargauge" -> Bargauge.render(panel, data, height)
-      _ -> render_unknown(panel, height)
+      "text" -> render_text(panel, height)
+      _ -> placeholder(label: "#{panel.type}: #{panel.title}", height: height)
     end
   end
 
-  defp render_unknown(panel, height) do
-    import Drafter.App, only: [placeholder: 1]
-    placeholder(label: "#{panel.type}: #{panel.title}", height: height)
+  defp render_text(panel, height) do
+    content = get_in(panel.options, ["content"]) || ""
+    text = content |> String.replace(~r/<[^>]+>/, "") |> String.trim()
+    vertical([label(panel.title, style: %{bold: true}), label(text, [])], height: height)
   end
 end

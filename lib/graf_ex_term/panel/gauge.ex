@@ -1,7 +1,7 @@
 defmodule GrafExTerm.Panel.Gauge do
   import Drafter.App, only: [gauge: 1, horizontal: 2, placeholder: 1]
 
-  def render(panel, {:ok, series}, height) when series != [] do
+  def render(panel, {:ok, series}, _height) when series != [] do
     max_val = get_max(panel.field_config)
 
     gauges =
