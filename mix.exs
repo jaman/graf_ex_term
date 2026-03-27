@@ -13,11 +13,7 @@ defmodule GrafExTerm.MixProject do
         "Terminal UI for Grafana dashboards — live Prometheus queries rendered as interactive TUI panels",
       package: package(),
       docs: docs(),
-      releases: [
-        graf_ex_term: [
-          strip_beams: Mix.env() == :prod
-        ]
-      ],
+      releases: releases(),
       source_url: "https://github.com/your-org/graf_ex_term",
       homepage_url: "https://github.com/your-org/graf_ex_term"
     ]
@@ -40,9 +36,34 @@ defmodule GrafExTerm.MixProject do
       {:jason, "~> 1.4"},
       {:phoenix_pubsub, "~> 2.1"},
       {:cachex, "~> 3.6"},
+      {:burrito, "~> 1.0", only: :prod, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
+  end
+
+  defp releases do
+    base = [strip_beams: Mix.env() == :prod]
+
+    if Mix.env() == :prod do
+      [
+        graf_ex_term:
+          base ++
+            [
+              steps: [:assemble, &Burrito.wrap/1],
+              burrito: [
+                targets: [
+                  linux_x86_64: [os: :linux, cpu: :x86_64],
+                  linux_aarch64: [os: :linux, cpu: :aarch64],
+                  macos_x86_64: [os: :darwin, cpu: :x86_64],
+                  macos_aarch64: [os: :darwin, cpu: :aarch64]
+                ]
+              ]
+            ]
+      ]
+    else
+      [graf_ex_term: base]
+    end
   end
 
   defp package do
