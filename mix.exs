@@ -51,19 +51,21 @@ defmodule GrafExTerm.MixProject do
           base ++
             [
               steps: [:assemble, &Burrito.wrap/1],
-              burrito: [
-                targets: [
-                  linux_x86_64: [os: :linux, cpu: :x86_64],
-                  linux_aarch64: [os: :linux, cpu: :aarch64],
-                  macos_x86_64: [os: :darwin, cpu: :x86_64],
-                  macos_aarch64: [os: :darwin, cpu: :aarch64]
-                ]
-              ]
+              burrito: [targets: burrito_targets()]
             ]
       ]
     else
       [graf_ex_term: base]
     end
+  end
+
+  defp burrito_targets do
+    [
+      linux_x86_64: [os: :linux, cpu: :x86_64, qualifiers: [skip_nifs: true]],
+      linux_aarch64: [os: :linux, cpu: :aarch64, qualifiers: [skip_nifs: true]],
+      macos_x86_64: [os: :darwin, cpu: :x86_64],
+      macos_aarch64: [os: :darwin, cpu: :aarch64]
+    ]
   end
 
   defp package do
