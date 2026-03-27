@@ -13,6 +13,11 @@ defmodule GrafExTerm.MixProject do
         "Terminal UI for Grafana dashboards — live Prometheus queries rendered as interactive TUI panels",
       package: package(),
       docs: docs(),
+      releases: [
+        graf_ex_term: [
+          strip_beams: Mix.env() == :prod
+        ]
+      ],
       source_url: "https://github.com/your-org/graf_ex_term",
       homepage_url: "https://github.com/your-org/graf_ex_term"
     ]

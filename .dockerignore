@@ -1,0 +1,10 @@
+_build/
+deps/
+.git/
+.elixir_ls/
+erl_crash.dump
+*.ez
+drafter.log
+drafter_demo.cast
+*.cast
+dashboards.json
