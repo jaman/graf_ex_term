@@ -2,8 +2,12 @@ defmodule GrafExTerm.Application do
   @moduledoc false
   use Application
 
+  @debug_log "/tmp/graf_ex_term_debug.log"
+
   @impl true
   def start(_type, _args) do
+    debug("Application.start called, __BURRITO=#{inspect(System.get_env("__BURRITO"))}, release?=#{release?()}")
+
     children =
       [
         {Phoenix.PubSub, name: GrafExTerm.PubSub},
@@ -16,6 +20,8 @@ defmodule GrafExTerm.Application do
         GrafExTerm.Dashboard.Store
       ] ++ entry_child()
 
+    debug("children=#{inspect(length(children))}, entry_included?=#{release?()}")
+
     Supervisor.start_link(children, strategy: :one_for_one, name: GrafExTerm.Supervisor)
   end
 
@@ -24,6 +30,10 @@ defmodule GrafExTerm.Application do
   end
 
   defp release? do
-    not Code.ensure_loaded?(Mix)
+    System.get_env("__BURRITO") != nil
+  end
+
+  defp debug(msg) do
+    File.write!(@debug_log, "#{DateTime.utc_now()} #{msg}\n", [:append])
   end
 end

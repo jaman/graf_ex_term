@@ -63,8 +63,8 @@ defmodule GrafExTerm.MixProject do
     [
       linux_x86_64: [os: :linux, cpu: :x86_64, skip_nifs: true],
       linux_aarch64: [os: :linux, cpu: :aarch64, skip_nifs: true],
-      macos_x86_64: [os: :darwin, cpu: :x86_64],
-      macos_aarch64: [os: :darwin, cpu: :aarch64]
+      macos_aarch64: [os: :darwin, cpu: :aarch64],
+      macos_x86_64: [os: :darwin, cpu: :x86_64]
     ]
   end
 

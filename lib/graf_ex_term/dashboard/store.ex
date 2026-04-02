@@ -185,7 +185,8 @@ defmodule GrafExTerm.Dashboard.Store do
   defp persist(entries) do
     data = Enum.map(entries, fn e ->
       Enum.reduce(@persisted_keys, %{uid: e.uid, uri: e.uri}, fn key, acc ->
-        Map.put(acc, key, Map.get(e, key, Map.get(@defaults, key)))
+        value = Map.get(e, key, Map.get(@defaults, key))
+        Map.put(acc, key, serialize(key, value))
       end)
     end)
     File.write!(store_path(), Jason.encode!(data))
