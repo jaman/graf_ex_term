@@ -230,7 +230,9 @@ defmodule GrafExTerm.Dashboard.Store do
 
   def serialize_table_layouts(table_layouts) when is_map(table_layouts) do
     Map.new(table_layouts, fn {panel_id, layout} ->
-      {to_string(panel_id), %{col_widths: layout.col_widths, col_order: layout.col_order}}
+      col_widths = layout[:col_widths] || layout["col_widths"]
+      col_order = layout[:col_order] || layout["col_order"]
+      {to_string(panel_id), %{col_widths: col_widths, col_order: col_order}}
     end)
   end
 
