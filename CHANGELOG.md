@@ -21,7 +21,7 @@
   - `gauge` — one dial per series. `bargauge` — one bar per series.
   - `row` — collapsible section headers; collapse state is saved per dashboard.
   - Other panel types show a placeholder.
-- `GrafExTerm.Layout.GridMapper`: maps Grafana grid positions to a Drafter layout.
+- `GrafExTerm.Layout.GridMapper.to_tui_layout/3`: maps Grafana grid positions to a Drafter layout; options `:column_visibility`, `:collapsed_rows`, `:table_layouts`, `:collapsed_table_panels`, `:all_tables_collapsed`, `:column_filter`.
 - Configuration under `:graf_ex_term`: `:datasources`, `:theme`, `:height_ratio`, `:time_range_seconds`, `:chart_resolution`, `:default_refresh_ms`. `config/runtime.exs` reads them from `PROMETHEUS`, `GRAF_EX_TERM_THEME`, `GRAF_EX_TERM_HEIGHT_RATIO`, `GRAF_EX_TERM_REFRESH_MS`, `GRAF_EX_TERM_TIME_RANGE` and `GRAF_EX_TERM_CHART_RESOLUTION`.
 - `mix dump_layout path/to/dashboard.json`: writes `generated_layout.exs`, a standalone Drafter script reproducing a dashboard's layout with placeholder panels.
 - Standalone binaries through Burrito (`MIX_ENV=prod mix release`) for Linux x86_64 and aarch64 and macOS aarch64 and x86_64; the binary starts the UI on launch and exits when it closes. A `Dockerfile` builds an Alpine release image.

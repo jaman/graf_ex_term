@@ -32,7 +32,7 @@ defmodule GrafExTerm.MixProject do
   defp deps do
     [
       family(:drafter, "~> 0.4.0", "../drafter"),
-      {:req, "~> 0.5"},
+      {:req, "~> 0.7"},
       {:jason, "~> 1.4"},
       {:phoenix_pubsub, "~> 2.1"},
       {:cachex, "~> 3.6"},

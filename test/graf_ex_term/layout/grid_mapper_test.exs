@@ -89,12 +89,12 @@ defmodule GrafExTerm.Layout.GridMapperTest do
   end
 
   describe "row panels" do
-    test "row panel appears as a widget before its child panels" do
+    test "row panel is a collapsible holding its child panels" do
       row_panel = panel(0, "row", 0, 0, 24, 1, "My Section")
       child_panel = panel(1, "timeseries", 0, 1, 24, 8)
 
-      result = GridMapper.to_tui_layout([row_panel, child_panel], %{})
-      assert length(result) == 2
+      assert [{:collapsible, "My Section", [{:layout, :horizontal, [_child], _}], _}] =
+               GridMapper.to_tui_layout([row_panel, child_panel], %{})
     end
 
     test "collapsed row omits child panels" do
@@ -102,7 +102,7 @@ defmodule GrafExTerm.Layout.GridMapperTest do
       child_panel = panel(1, "timeseries", 0, 1, 24, 8)
       collapsed = MapSet.new([0])
 
-      result = GridMapper.to_tui_layout([row_panel, child_panel], %{}, %{}, %{}, collapsed)
+      result = GridMapper.to_tui_layout([row_panel, child_panel], %{}, collapsed_rows: collapsed)
       assert length(result) == 1
     end
   end

@@ -25,66 +25,53 @@ defmodule GrafExTerm.Layout.GridMapper do
   that panel's cached data; a panel with no entry is rendered from
   `{:error, :no_data}`.
 
-  The remaining arguments are optional:
+  Options:
 
-    * `_variables` — accepted and ignored.
-    * `column_visibility` — map of panel id to a `MapSet` of table column keys
+    * `:column_visibility` — map of panel id to a `MapSet` of table column keys
       to show. Defaults to `%{}`, showing all.
-    * `collapsed_rows` — `MapSet` of row panel ids that are collapsed.
+    * `:collapsed_rows` — `MapSet` of row panel ids that are collapsed.
       Defaults to an empty set.
-    * `table_layouts` — map of panel id to saved column widths and order.
+    * `:table_layouts` — map of panel id to saved column widths and order.
       Defaults to `%{}`.
-    * `collapsed_table_panels` — `MapSet` of table panel ids drawn collapsed.
+    * `:collapsed_table_panels` — `MapSet` of table panel ids drawn collapsed.
       Defaults to an empty set.
-    * `all_tables_collapsed` — when `true`, collapses every table panel
-      regardless of `collapsed_table_panels`. Defaults to `false`.
-    * `column_filter` — draws the per-column checkbox selector above each
+    * `:all_tables_collapsed` — when `true`, collapses every table panel
+      regardless of `:collapsed_table_panels`. Defaults to `false`.
+    * `:column_filter` — draws the per-column checkbox selector above each
       table. Defaults to `false`.
 
   Row height is the tallest `grid_pos.h` in the band multiplied by the
   `:height_ratio` application environment value, which defaults to `3`.
 
   Returns a list of Drafter widget tuples, ready to place inside a scrollable.
+
+  ## Example
+
+      GridMapper.to_tui_layout(dashboard.panels, panel_data,
+        collapsed_rows: MapSet.new([4]),
+        column_filter: true
+      )
   """
-  @spec to_tui_layout(
-          [GrafExTerm.Dashboard.Types.Panel.t()],
-          map(),
-          map(),
-          map(),
-          MapSet.t(),
-          map(),
-          MapSet.t(),
-          boolean(),
-          boolean()
-        ) :: [tuple()]
-  def to_tui_layout(
-        panels,
-        panel_data,
-        _variables \\ %{},
-        column_visibility \\ %{},
-        collapsed_rows \\ MapSet.new(),
-        table_layouts \\ %{},
-        collapsed_table_panels \\ MapSet.new(),
-        all_tables_collapsed \\ false,
-        column_filter \\ false
-      ) do
-    height_ratio = Application.get_env(:graf_ex_term, :height_ratio, 3)
+  @spec to_tui_layout([GrafExTerm.Dashboard.Types.Panel.t()], map(), keyword()) :: [tuple()]
+  def to_tui_layout(panels, panel_data, opts \\ []) do
+    view = view(panel_data, opts)
 
     panels
     |> group_by_row_section()
-    |> Enum.flat_map(fn section ->
-      build_section_widgets(
-        section,
-        panel_data,
-        height_ratio,
-        column_visibility,
-        collapsed_rows,
-        table_layouts,
-        collapsed_table_panels,
-        all_tables_collapsed,
-        column_filter
-      )
-    end)
+    |> Enum.flat_map(&build_section_widgets(&1, view))
+  end
+
+  defp view(panel_data, opts) do
+    %{
+      panel_data: panel_data,
+      height_ratio: Application.get_env(:graf_ex_term, :height_ratio, 3),
+      column_visibility: Keyword.get(opts, :column_visibility, %{}),
+      collapsed_rows: Keyword.get(opts, :collapsed_rows, MapSet.new()),
+      table_layouts: Keyword.get(opts, :table_layouts, %{}),
+      collapsed_table_panels: Keyword.get(opts, :collapsed_table_panels, MapSet.new()),
+      all_tables_collapsed: Keyword.get(opts, :all_tables_collapsed, false),
+      column_filter: Keyword.get(opts, :column_filter, false)
+    }
   end
 
   defp group_by_row_section(panels) do
@@ -109,151 +96,56 @@ defmodule GrafExTerm.Layout.GridMapper do
     {sections, current_row, current_panels ++ [panel]}
   end
 
-  defp build_section_widgets(
-         {nil, panels},
-         panel_data,
-         height_ratio,
-         column_visibility,
-         _collapsed_rows,
-         table_layouts,
-         collapsed_table_panels,
-         all_tables_collapsed,
-         column_filter
-       ) do
-    build_panel_row_widgets(
-      panels,
-      panel_data,
-      height_ratio,
-      column_visibility,
-      table_layouts,
-      collapsed_table_panels,
-      all_tables_collapsed,
-      column_filter
-    )
+  defp build_section_widgets({nil, panels}, view) do
+    panels |> build_panel_row_widgets_with_height(view) |> elem(0)
   end
 
-  defp build_section_widgets(
-         {row_panel, panels},
-         panel_data,
-         height_ratio,
-         column_visibility,
-         collapsed_rows,
-         table_layouts,
-         collapsed_table_panels,
-         all_tables_collapsed,
-         column_filter
-       ) do
-    collapsed = MapSet.member?(collapsed_rows, row_panel.id)
-
-    {children, content_height} =
-      build_panel_row_widgets_with_height(
-        panels,
-        panel_data,
-        height_ratio,
-        column_visibility,
-        table_layouts,
-        collapsed_table_panels,
-        all_tables_collapsed,
-        column_filter
-      )
-
+  defp build_section_widgets({row_panel, panels}, view) do
+    collapsed = MapSet.member?(view.collapsed_rows, row_panel.id)
+    {children, content_height} = build_panel_row_widgets_with_height(panels, view)
     [Row.render(row_panel, collapsed, length(panels), children, content_height)]
   end
 
-  defp build_panel_row_widgets(
-         [],
-         _panel_data,
-         _height_ratio,
-         _column_visibility,
-         _table_layouts,
-         _collapsed_table_panels,
-         _all_tables_collapsed,
-         _column_filter
-       ),
-       do: []
+  defp build_panel_row_widgets_with_height([], _view), do: {[], 0}
 
-  defp build_panel_row_widgets(
-         panels,
-         panel_data,
-         height_ratio,
-         column_visibility,
-         table_layouts,
-         collapsed_table_panels,
-         all_tables_collapsed,
-         column_filter
-       ) do
-    {widgets, _} =
-      build_panel_row_widgets_with_height(
-        panels,
-        panel_data,
-        height_ratio,
-        column_visibility,
-        table_layouts,
-        collapsed_table_panels,
-        all_tables_collapsed,
-        column_filter
-      )
-
-    widgets
-  end
-
-  defp build_panel_row_widgets_with_height(
-         [],
-         _panel_data,
-         _height_ratio,
-         _column_visibility,
-         _table_layouts,
-         _collapsed_table_panels,
-         _all_tables_collapsed,
-         _column_filter
-       ),
-       do: {[], 0}
-
-  defp build_panel_row_widgets_with_height(
-         panels,
-         panel_data,
-         height_ratio,
-         column_visibility,
-         table_layouts,
-         collapsed_table_panels,
-         all_tables_collapsed,
-         column_filter
-       ) do
+  defp build_panel_row_widgets_with_height(panels, view) do
     rows =
       panels
       |> Enum.sort_by(fn p -> p.grid_pos.x end)
       |> Enum.group_by(fn p -> p.grid_pos.y end)
       |> Enum.sort_by(fn {y, _} -> y end)
-      |> Enum.map(fn {_, row_panels} ->
-        row_height =
-          row_panels
-          |> Enum.map(fn p -> p.grid_pos.h end)
-          |> Enum.max(fn -> 8 end)
-          |> Kernel.*(height_ratio)
-
-        widgets =
-          Enum.map(row_panels, fn panel ->
-            data = Map.get(panel_data, panel.id, {:error, :no_data})
-
-            table_expanded =
-              not (all_tables_collapsed or MapSet.member?(collapsed_table_panels, panel.id))
-
-            widget =
-              Renderer.render(
-                panel,
-                data,
-                column_visibility,
-                table_layouts,
-                table_expanded,
-                column_filter
-              )
-
-            vertical([widget], colspan: panel.grid_pos.w)
-          end)
-
-        {horizontal(widgets, gap: 1), row_height}
-      end)
+      |> Enum.map(fn {_, row_panels} -> build_band(row_panels, view) end)
 
     {Enum.map(rows, &elem(&1, 0)), rows |> Enum.map(&elem(&1, 1)) |> Enum.sum()}
+  end
+
+  defp build_band(row_panels, view) do
+    row_height =
+      row_panels
+      |> Enum.map(fn p -> p.grid_pos.h end)
+      |> Enum.max(fn -> 8 end)
+      |> Kernel.*(view.height_ratio)
+
+    widgets = Enum.map(row_panels, &build_panel_widget(&1, view))
+    {horizontal(widgets, gap: 1), row_height}
+  end
+
+  defp build_panel_widget(panel, view) do
+    data = Map.get(view.panel_data, panel.id, {:error, :no_data})
+
+    table_expanded =
+      not (view.all_tables_collapsed or MapSet.member?(view.collapsed_table_panels, panel.id))
+
+    widget =
+      Renderer.render(
+        panel,
+        data,
+        view.column_visibility,
+        view.table_layouts,
+        table_expanded,
+        view.column_filter
+      )
+
+    vertical([widget], colspan: panel.grid_pos.w)
   end
 end

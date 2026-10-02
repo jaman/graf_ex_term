@@ -88,15 +88,11 @@ defmodule GrafExTerm.Screen.Viewer do
         [loading_indicator(running: true)]
       else
         [
-          GridMapper.to_tui_layout(
-            state.dashboard.panels,
-            state.prepared_panel_data,
-            state.variables,
-            state.column_visibility,
-            state.collapsed_rows,
-            %{},
-            state.collapsed_table_panels,
-            state.all_tables_collapsed
+          GridMapper.to_tui_layout(state.dashboard.panels, state.prepared_panel_data,
+            column_visibility: state.column_visibility,
+            collapsed_rows: state.collapsed_rows,
+            collapsed_table_panels: state.collapsed_table_panels,
+            all_tables_collapsed: state.all_tables_collapsed
           )
         ]
       end

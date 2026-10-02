@@ -346,16 +346,11 @@ defmodule GrafExTerm.Screen.Main do
   defp right_panel_items(state) do
     case Store.get_dashboard(state.selected_uid) do
       {:ok, dashboard} ->
-        GridMapper.to_tui_layout(
-          dashboard.panels,
-          state.prepared_panel_data,
-          state.variables,
-          state.column_visibility,
-          state.collapsed_rows,
-          state.table_layouts,
-          MapSet.new(),
-          false,
-          state.column_filter
+        GridMapper.to_tui_layout(dashboard.panels, state.prepared_panel_data,
+          column_visibility: state.column_visibility,
+          collapsed_rows: state.collapsed_rows,
+          table_layouts: state.table_layouts,
+          column_filter: state.column_filter
         )
 
       {:error, _} ->
