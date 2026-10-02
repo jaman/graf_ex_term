@@ -1,5 +1,26 @@
 defmodule GrafExTerm.Screen.Viewer do
-  @moduledoc false
+  @moduledoc """
+  Full-screen Drafter screen showing one dashboard, pushed onto the stack by
+  `GrafExTerm.Screen.Browser`.
+
+  Mounting starts a `GrafExTerm.Variable.Manager` and a
+  `GrafExTerm.Refresh.Scheduler` for the dashboard; leaving the screen, by
+  `Esc` or unmount, stops both.
+
+  Data is polled from `GrafExTerm.Refresh.DataCache` every 500 ms rather than
+  driven by PubSub, and only rebuilt when the cache version changes. Table
+  panels are prepared on arrival; other panel types are rendered from raw
+  cache data.
+
+  Props: `%{dashboard: dashboard}`, a parsed
+  `GrafExTerm.Dashboard.Types.Dashboard`.
+
+  Key bindings: `r` refreshes, `Esc` returns to the caller, `q` quits.
+
+  Column visibility, collapsed rows and collapsed tables live only in screen
+  state; nothing here is persisted to `GrafExTerm.Dashboard.Store`.
+  """
+
   use Drafter.App
 
   alias GrafExTerm.Layout.GridMapper
@@ -66,12 +87,27 @@ defmodule GrafExTerm.Screen.Viewer do
       if state.loading do
         [loading_indicator(running: true)]
       else
-        [GridMapper.to_tui_layout(state.dashboard.panels, state.prepared_panel_data, state.variables, state.column_visibility, state.collapsed_rows, %{}, state.collapsed_table_panels, state.all_tables_collapsed)]
+        [
+          GridMapper.to_tui_layout(
+            state.dashboard.panels,
+            state.prepared_panel_data,
+            state.variables,
+            state.column_visibility,
+            state.collapsed_rows,
+            %{},
+            state.collapsed_table_panels,
+            state.all_tables_collapsed
+          )
+        ]
       end
 
     vertical([
       header("graf_ex_term  ▸  #{state.dashboard.title}"),
-      checkbox("Collapse all tables", id: :collapse_all_tables, checked: state.all_tables_collapsed, on_change: :toggle_all_tables),
+      checkbox("Collapse all tables",
+        id: :collapse_all_tables,
+        checked: state.all_tables_collapsed,
+        on_change: :toggle_all_tables
+      ),
       scrollable(content, flex: 1),
       footer(
         bindings: [
@@ -103,6 +139,7 @@ defmodule GrafExTerm.Screen.Viewer do
       if collapsed,
         do: MapSet.put(state.collapsed_table_panels, panel_id),
         else: MapSet.delete(state.collapsed_table_panels, panel_id)
+
     {:noreply, %{state | collapsed_table_panels: new_set}}
   end
 
@@ -111,6 +148,7 @@ defmodule GrafExTerm.Screen.Viewer do
       if collapsed,
         do: MapSet.put(state.collapsed_rows, row_id),
         else: MapSet.delete(state.collapsed_rows, row_id)
+
     {:noreply, %{state | collapsed_rows: new_collapsed}}
   end
 
@@ -157,7 +195,9 @@ defmodule GrafExTerm.Screen.Viewer do
           {:prepared, _, all_cols} -> MapSet.new(all_cols, fn c -> c.key end)
           _ -> MapSet.new()
         end
-      existing -> existing
+
+      existing ->
+        existing
     end
   end
 

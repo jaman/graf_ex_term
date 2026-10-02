@@ -1,0 +1,13 @@
+/_build/
+/cover/
+/deps/
+/doc/
+/burrito_out/
+/.elixir_ls/
+erl_crash.dump
+*.ez
+graf_ex_term-*.tar
+*.log
+*.cast
+dashboards.json
+generated_layout.exs

@@ -62,6 +62,7 @@ defmodule GrafExTerm.Screen.MainTest do
   describe "handle_event/3 — table_row_selected" do
     setup do
       panel_data = %{1 => {:ok, [%{labels: %{"host" => "h1"}, values: [{0, 1.0}]}]}}
+
       prepared = %{
         1 => {:ok, [%{labels: %{"host" => "h1"}, values: [{0, 1.0}]}]},
         2 => {:prepared, [%{cpu: 55}], [%{key: :cpu, label: "CPU"}]}
@@ -163,7 +164,11 @@ defmodule GrafExTerm.Screen.MainTest do
     end
 
     test "table_row_selected with empty rows clears row_filter", %{ctx: ctx} do
-      send(ctx.app_pid, {:widget_action, :some_widget, {:app_callback, {:table_row_selected, 1}, []}})
+      send(
+        ctx.app_pid,
+        {:widget_action, :some_widget, {:app_callback, {:table_row_selected, 1}, []}}
+      )
+
       Process.sleep(20)
       state = Drafter.Test.get_state(ctx)
       assert state.row_filter == nil

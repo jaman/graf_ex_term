@@ -1,7 +1,33 @@
 defmodule GrafExTerm.Dashboard.Parser do
-  @moduledoc false
+  @moduledoc """
+  Turns decoded Grafana dashboard JSON into `GrafExTerm.Dashboard.Types`
+  structs.
+
+  Parsing is total: every field the source omits gets a documented default, so
+  the result is always a fully populated `Dashboard` and no consumer has to
+  guard against `nil`.
+
+      {:ok, raw} = GrafExTerm.Dashboard.Loader.load(uri)
+      {:ok, dashboard} = GrafExTerm.Dashboard.Parser.parse(raw)
+  """
+
   alias GrafExTerm.Dashboard.Types.{Dashboard, Panel, Target, TemplateVar}
 
+  @doc """
+  Builds a `Dashboard` from a decoded JSON map.
+
+  `raw` is either a bare dashboard object or one wrapped under a
+  `"dashboard"` key, as returned by the Grafana HTTP API; both are accepted.
+
+  Panels are flattened: a `"row"` panel carrying nested `"panels"` is emitted
+  first and its children follow it at the top level, so the result is a single
+  ordered list with row headers inline. Row membership is therefore positional
+  — the panels between one row and the next belong to it.
+
+  Always returns `{:ok, dashboard}`. Anything that is not a map raises
+  `FunctionClauseError`.
+  """
+  @spec parse(map()) :: {:ok, Dashboard.t()}
   def parse(%{"dashboard" => nested}) when is_map(nested), do: parse(nested)
 
   def parse(raw) when is_map(raw) do
@@ -75,6 +101,18 @@ defmodule GrafExTerm.Dashboard.Parser do
   defp parse_datasource_ref(ref) when is_binary(ref), do: ref
   defp parse_datasource_ref(_), do: nil
 
+  @doc """
+  Lists the template variable names the dashboard's targets use to pick a
+  datasource.
+
+  Only `:datasource_ref` values of the whole-string form `$name` or
+  `${name}` count; a literal uid contributes nothing. Names are returned once
+  each, in first-seen order.
+
+  These are the variables the user is asked to supply a URL for when adding a
+  dashboard, and the keys of the map stored by
+  `GrafExTerm.Dashboard.Store.save_datasource_map/2`.
+  """
   @spec datasource_vars(Dashboard.t()) :: [String.t()]
   def datasource_vars(%Dashboard{panels: panels}) do
     panels
@@ -96,7 +134,9 @@ defmodule GrafExTerm.Dashboard.Parser do
           rename: Map.get(opts, "renameByName", %{}),
           index: Map.get(opts, "indexByName", %{})
         }
-      _ -> nil
+
+      _ ->
+        nil
     end)
   end
 

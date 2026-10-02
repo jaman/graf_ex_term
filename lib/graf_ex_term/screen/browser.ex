@@ -1,5 +1,15 @@
 defmodule GrafExTerm.Screen.Browser do
-  @moduledoc false
+  @moduledoc """
+  Drafter screen listing the dashboards held by
+  `GrafExTerm.Dashboard.Registry` and opening the chosen one.
+
+  Selecting an entry pushes `GrafExTerm.Screen.Viewer` with the parsed
+  dashboard. `r` reloads the list from the registry and `q` quits.
+
+  The registry is not supervised by `GrafExTerm.Application`, so it must
+  already be running; the list is empty otherwise.
+  """
+
   use Drafter.App
 
   def mount(_props) do
@@ -13,7 +23,13 @@ defmodule GrafExTerm.Screen.Browser do
     vertical([
       header("graf_ex_term  ▸  Dashboards"),
       scrollable(
-        [radio_set(items, id: :dashboard_browser, on_change: :open_dashboard, height: length(items))],
+        [
+          radio_set(items,
+            id: :dashboard_browser,
+            on_change: :open_dashboard,
+            height: length(items)
+          )
+        ],
         flex: 1
       ),
       footer(

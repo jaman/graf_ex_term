@@ -1,8 +1,39 @@
 defmodule GrafExTerm.Refresh.SeriesClusterer do
-  @moduledoc false
+  @moduledoc """
+  Collapses a large set of similar series into a smaller set of representative
+  ones so a chart stays readable.
+
+  Series are clustered by their mean value: sorted by mean, split wherever
+  consecutive means differ by more than the value range divided by the target
+  count, and then the closest neighbouring groups merged until the target is
+  met.
+
+  A cluster is represented by its first member with its samples replaced by
+  the per-timestamp median of the group, its name suffixed with the number of
+  other members, and a `:weight` field set to the member count.
+  `GrafExTerm.Panel.Timeseries` reads that weight to scale a cluster's opacity.
+  Single-member clusters keep their own values and get a weight of 1.
+
+  Timestamps come from the first member of each cluster; a member missing a
+  timestamp contributes `0.0` at that point, so series that do not share a
+  time base drag the median down.
+  """
+
   @max_series 30
   @min_series_for_clustering 25
 
+  @doc """
+  Reduces `series` to at most `max_series` representatives.
+
+  `series` is a list of maps with `:values`, each a list of
+  `{timestamp, number}`. `max_series` is the target count and defaults to 30.
+
+  Lists of 25 series or fewer are returned untouched, without the `:weight`
+  field, whatever `max_series` says.
+
+  Returns the clustered list, each entry carrying a `:weight` giving how many
+  input series it stands for.
+  """
   @spec cluster(list(), non_neg_integer()) :: list()
   def cluster(series, max_series \\ @max_series)
 

@@ -1,5 +1,36 @@
 defmodule GrafExTerm.Screen.Main do
-  @moduledoc false
+  @moduledoc """
+  The application's root Drafter screen: a dashboard list on the left, the
+  selected dashboard's panels on the right.
+
+  Selecting a dashboard starts a `GrafExTerm.Variable.Manager` and a
+  `GrafExTerm.Refresh.Scheduler` for it and subscribes to its
+  `"dashboard:<uid>"` PubSub topic; deselecting or selecting another stops
+  them again, so at most one dashboard is being queried at a time.
+
+  Refresh announcements only schedule a poll of
+  `GrafExTerm.Refresh.DataCache`; the cache's version decides whether anything
+  is rebuilt. Data arriving while the user is scrolling is parked in
+  `:pending_data` and applied when scrolling stops, so a refresh never
+  reflows the view under the user's cursor.
+
+  Fetched data is prepared once per arrival rather than per frame: table
+  panels become `{:prepared, rows, columns}` and timeseries panels
+  `{:prepared_ts, map}`, and rendering consumes those.
+
+  Selecting rows in a table filters every timeseries panel on the dashboard to
+  the series whose labels match the selected rows; selecting none clears the
+  filter.
+
+  Key bindings: `a` adds a dashboard, `f` toggles the per-column table
+  selector, `r` refreshes the selected dashboard, `q` quits.
+
+  Per-dashboard settings — visible columns, table layouts, collapsed rows and
+  the column filter — are read from and written back to
+  `GrafExTerm.Dashboard.Store`. A dashboard with no stored collapsed rows
+  opens with every row collapsed.
+  """
+
   use Drafter.App, mouse_hover: false
   import Drafter.App
 
@@ -130,7 +161,11 @@ defmodule GrafExTerm.Screen.Main do
       horizontal(
         [
           button("+Add", on_click: :add_dashboard, variant: :primary),
-          checkbox("Filter", id: :column_filter, checked: state.column_filter, on_change: :toggle_column_filter)
+          checkbox("Filter",
+            id: :column_filter,
+            checked: state.column_filter,
+            on_change: :toggle_column_filter
+          )
         ],
         gap: 2
       ),
@@ -225,13 +260,18 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   def handle_event({:table_row_selected, _panel_id}, [], state) do
-    prepared = refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, nil)
+    prepared =
+      refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, nil)
+
     {:noreply, %{state | prepared_panel_data: prepared, row_filter: nil}}
   end
 
   def handle_event({:table_row_selected, _panel_id}, rows, state) do
     filter = extract_label_filter(rows)
-    prepared = refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, filter)
+
+    prepared =
+      refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, filter)
+
     {:noreply, %{state | prepared_panel_data: prepared, row_filter: filter}}
   end
 
@@ -392,7 +432,8 @@ defmodule GrafExTerm.Screen.Main do
     {:prepared, rows, cols}
   end
 
-  defp prepare_single_panel(%{type: type} = panel, data, row_filter) when type in ["timeseries", "graph"] do
+  defp prepare_single_panel(%{type: type} = panel, data, row_filter)
+       when type in ["timeseries", "graph"] do
     filtered = apply_row_filter(data, row_filter)
     Timeseries.prepare(panel, filtered)
   end
@@ -413,7 +454,9 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   defp classify_panel(_panel, {acc, true}, _collapsed_rows), do: {acc, true}
-  defp classify_panel(panel, {acc, false}, _collapsed_rows), do: {MapSet.put(acc, panel.id), false}
+
+  defp classify_panel(panel, {acc, false}, _collapsed_rows),
+    do: {MapSet.put(acc, panel.id), false}
 
   defp refilter_series(prepared, raw_panel_data, panels, filter) do
     panel_map = Map.new(panels, fn p -> {p.id, p} end)

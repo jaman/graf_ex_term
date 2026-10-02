@@ -1,5 +1,21 @@
 defmodule GrafExTerm.Screen.AddDashboardModal do
-  @moduledoc false
+  @moduledoc """
+  Two-step Drafter modal for registering a dashboard.
+
+  The first step takes a `file://` or `http(s)://` URI, typed or chosen with
+  the file picker, and hands it to `GrafExTerm.Dashboard.Store.add/1`. A load
+  or parse failure is shown inline and the modal stays open.
+
+  The dashboard is registered as soon as the first step succeeds. The second
+  step only collects datasource URLs: a Prometheus base URL overriding the
+  global default, and one URL per datasource template variable the dashboard
+  uses. Skipping it leaves the dashboard registered with no overrides.
+
+  Both exits from the second step send `:refresh_dashboards` to the
+  application loop so the list behind the modal reloads. Pops `:done` when
+  saved or skipped, and `:cancelled` on `Esc` or the cancel button.
+  """
+
   use Drafter.Screen
 
   alias Drafter.Widget.FilePicker
@@ -8,6 +24,7 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
   def mount(_props) do
     %{
       uri: "",
+      source: "",
       error: nil,
       loading: false,
       step: :uri_input,
@@ -51,7 +68,7 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
   end
 
   def render(%{step: :datasource_config} = state) do
-    inputs =
+    var_inputs =
       Enum.flat_map(state.datasource_vars, fn var_name ->
         [
           label("#{var_name}:"),
@@ -66,9 +83,23 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
 
     vertical(
       [
-        label("Configure datasource URLs:", style: %{bold: true}),
+        label("Prometheus source (overrides global default):", style: %{bold: true}),
+        text_input(
+          value: state.source,
+          placeholder: "http://prometheus:9090 (leave blank for global)",
+          on_change: :source_changed,
+          on_submit: :save_datasources
+        ),
         label(""),
-        vertical(inputs),
+        if state.datasource_vars != [] do
+          vertical([
+            label("Additional datasource variables:", style: %{bold: true}),
+            label(""),
+            vertical(var_inputs)
+          ])
+        else
+          label("")
+        end,
         if state.error do
           label("Error: #{state.error}", class: :error)
         else
@@ -114,10 +145,6 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
 
       uri ->
         case Store.add(uri) do
-          {:ok, %{datasource_vars: [], uid: _uid}} ->
-            Drafter.AppRegistry.send_to_loop({:app_event, :refresh_dashboards, nil})
-            {:pop, :done}
-
           {:ok, %{datasource_vars: vars, uid: uid}} ->
             {:ok, %{state | step: :datasource_config, datasource_vars: vars, dashboard_uid: uid}}
 
@@ -127,12 +154,26 @@ defmodule GrafExTerm.Screen.AddDashboardModal do
     end
   end
 
+  def handle_event(:source_changed, {url, _}, state) do
+    {:ok, %{state | source: url, error: nil}}
+  end
+
   def handle_event({:datasource_url_changed, var_name}, {url, _}, state) do
-    {:ok, %{state | datasource_inputs: Map.put(state.datasource_inputs, var_name, url), error: nil}}
+    {:ok,
+     %{state | datasource_inputs: Map.put(state.datasource_inputs, var_name, url), error: nil}}
   end
 
   def handle_event(:save_datasources, _data, state) do
-    Store.save_datasource_map(state.dashboard_uid, state.datasource_inputs)
+    source = String.trim(state.source)
+
+    if source != "" do
+      Store.save_source(state.dashboard_uid, source)
+    end
+
+    if state.datasource_inputs != %{} do
+      Store.save_datasource_map(state.dashboard_uid, state.datasource_inputs)
+    end
+
     Drafter.AppRegistry.send_to_loop({:app_event, :refresh_dashboards, nil})
     {:pop, :done}
   end

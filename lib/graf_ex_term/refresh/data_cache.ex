@@ -1,19 +1,69 @@
 defmodule GrafExTerm.Refresh.DataCache do
-  @moduledoc false
+  @moduledoc """
+  Singleton process holding the most recent query results for every dashboard,
+  downsampled for display.
+
+  `GrafExTerm.Refresh.Scheduler` writes here after each fetch and screens poll
+  with `take_if_updated/2`, which lets a screen skip re-rendering when nothing
+  has changed. Only the latest result per dashboard is kept; there is no
+  history.
+
+  Stored data is not the raw query result. Each series is reduced to at most
+  200 points by min/max bucketing — the extremes of each bucket are kept in
+  timestamp order, so spikes survive downsampling — and the series set is then
+  passed through `GrafExTerm.Refresh.SeriesClusterer`. Consumers therefore see
+  fewer points and possibly fewer series than the datasource returned, and
+  series may carry a `:weight`.
+
+  Versions are `System.monotonic_time/0` values, meaningful only for equality
+  against a previously observed version.
+  """
+
   use GenServer
 
   def start_link(_opts \\ []) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
   end
 
+  @doc """
+  Stores the results for `dashboard_uid`, replacing any previous entry.
+
+  `panel_data` maps panel id to that panel's result: `{:ok, series}`,
+  `{:table, columns, rows}`, or an `{:error, reason}`. Only `{:ok, series}`
+  entries are downsampled and clustered; everything else is stored as given.
+
+  Asynchronous — returns before the data is stored.
+  """
+  @spec put(String.t(), map()) :: :ok
   def put(dashboard_uid, panel_data) do
     GenServer.cast(__MODULE__, {:put, dashboard_uid, panel_data})
   end
 
+  @doc """
+  Returns the stored entry for `dashboard_uid`.
+
+  The entry is `%{panel_data: map, version: integer}`, or `nil` when nothing
+  has been stored for that dashboard yet.
+  """
+  @spec get(String.t()) :: %{panel_data: map(), version: integer()} | nil
   def get(dashboard_uid) do
     GenServer.call(__MODULE__, {:get, dashboard_uid})
   end
 
+  @doc """
+  Returns the stored entry for `dashboard_uid` only if it is newer than
+  `last_version`.
+
+  `last_version` is the `:version` of the entry the caller already has, or
+  `nil` on the first poll.
+
+  Returns `{:updated, %{panel_data: map, version: integer}}` when the stored
+  version differs, and `:unchanged` when it matches or when nothing has been
+  stored for that dashboard. Callers must keep the returned version and pass
+  it back on the next poll.
+  """
+  @spec take_if_updated(String.t(), integer() | nil) ::
+          {:updated, %{panel_data: map(), version: integer()}} | :unchanged
   def take_if_updated(dashboard_uid, last_version) do
     GenServer.call(__MODULE__, {:take_if_updated, dashboard_uid, last_version})
   end
@@ -28,7 +78,10 @@ defmodule GrafExTerm.Refresh.DataCache do
   @impl GenServer
   def handle_cast({:put, uid, panel_data}, state) do
     version = System.monotonic_time()
-    downsampled = Map.new(panel_data, fn {panel_id, data} -> {panel_id, downsample_panel(data)} end)
+
+    downsampled =
+      Map.new(panel_data, fn {panel_id, data} -> {panel_id, downsample_panel(data)} end)
+
     entry = %{panel_data: downsampled, version: version}
     {:noreply, Map.put(state, uid, entry)}
   end

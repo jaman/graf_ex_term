@@ -1,21 +1,70 @@
 defmodule GrafExTerm.Variable.Manager do
-  @moduledoc false
+  @moduledoc """
+  Per-dashboard process holding the current value of each template variable.
+
+  One is started under `GrafExTerm.VarSupervisor` for each dashboard the user
+  opens and registered in `GrafExTerm.VarRegistry` under the dashboard uid, so
+  callers address it by uid rather than pid. Opening a dashboard starts it and
+  leaving stops it; calling into it for a dashboard that is not open exits.
+
+  At start every `"query"` variable whose saved value is empty is resolved
+  against Prometheus. Only the `label_values(selector, label)` and
+  `label_values(label)` forms are understood, and the first returned value is
+  taken; any other query, or a failed lookup, leaves the variable empty.
+  Variables resolve in declaration order and each sees the ones before it, so
+  a variable may reference an earlier one.
+
+  Changing a value broadcasts `{:variables_changed, uid, values}` on the
+  `"dashboard:<uid>"` PubSub topic. It does not trigger a refetch;
+  `GrafExTerm.Refresh.Scheduler` picks the new values up on its next fetch.
+  """
+
   use GenServer
 
   alias GrafExTerm.Variable.Substitution
 
   require Logger
 
+  @doc """
+  Starts a manager for `dashboard` and resolves its variables.
+
+  `dashboard` is a `GrafExTerm.Dashboard.Types.Dashboard`. The process is
+  registered under `dashboard.uid`, so starting a second one for the same uid
+  returns `{:error, {:already_started, pid}}`.
+
+  Resolution happens in `init/1`, which issues HTTP requests, so this call
+  blocks for as long as those take.
+  """
+  @spec start_link(GrafExTerm.Dashboard.Types.Dashboard.t()) :: GenServer.on_start()
   def start_link(dashboard) do
     name = {:via, Registry, {GrafExTerm.VarRegistry, dashboard.uid}}
     GenServer.start_link(__MODULE__, dashboard, name: name)
   end
 
+  @doc """
+  Returns the current variable values for `dashboard_uid` as a map of name to
+  string.
+
+  Exits if no manager is running for that dashboard.
+  """
+  @spec get_values(String.t()) :: %{String.t() => String.t()}
   def get_values(dashboard_uid) do
     name = {:via, Registry, {GrafExTerm.VarRegistry, dashboard_uid}}
     GenServer.call(name, :get_values)
   end
 
+  @doc """
+  Sets `var_name` to `value` and broadcasts the change.
+
+  `var_name` is the variable name without the `$` sigil and `value` is the
+  replacement string. A name the dashboard never declared is accepted and
+  stored.
+
+  Subscribers to `"dashboard:<uid>"` receive
+  `{:variables_changed, uid, values}` carrying the full map. Exits if no
+  manager is running for that dashboard.
+  """
+  @spec set_value(String.t(), String.t(), String.t()) :: :ok
   def set_value(dashboard_uid, var_name, value) do
     name = {:via, Registry, {GrafExTerm.VarRegistry, dashboard_uid}}
     GenServer.call(name, {:set_value, var_name, value})
@@ -62,6 +111,7 @@ defmodule GrafExTerm.Variable.Manager do
       {:ok, [first | _]} ->
         Logger.debug("Variable resolved query=#{query} value=#{first}")
         first
+
       other ->
         Logger.debug("Variable unresolved query=#{query} result=#{inspect(other)}")
         ""
@@ -77,7 +127,9 @@ defmodule GrafExTerm.Variable.Manager do
       params = if metric_selector != "", do: ["match[]": metric_selector], else: []
 
       case Req.get(url, params: params) do
-        {:ok, %{body: %{"data" => values}}} when is_list(values) -> {:ok, values}
+        {:ok, %{body: %{"data" => values}}} when is_list(values) ->
+          {:ok, values}
+
         other ->
           Logger.debug("Label values fetch failed url=#{url} result=#{inspect(other)}")
           {:error, :failed}
@@ -87,7 +139,9 @@ defmodule GrafExTerm.Variable.Manager do
 
   defp parse_label_values(query) do
     case Regex.run(~r/^label_values\((.+),\s*(\w+)\)\s*$/, String.trim(query)) do
-      [_, metric_selector, label_name] -> {:ok, String.trim(metric_selector), label_name}
+      [_, metric_selector, label_name] ->
+        {:ok, String.trim(metric_selector), label_name}
+
       _ ->
         case Regex.run(~r/^label_values\((\w+)\)\s*$/, String.trim(query)) do
           [_, label_name] -> {:ok, "", label_name}

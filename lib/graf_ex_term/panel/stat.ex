@@ -1,10 +1,45 @@
 defmodule GrafExTerm.Panel.Stat do
-  @moduledoc false
-  import Drafter.App, only: [vertical: 2, horizontal: 2, label: 2, digits: 2, switch: 1, placeholder: 1]
+  @moduledoc """
+  Draws a Grafana `stat` panel, either as a large formatted number or as a row
+  of on/off switches.
+
+  The switch form is chosen automatically: when the panel's value mappings
+  define exactly two texts that form a known boolean pair — true/false,
+  yes/no, on/off, up/down, enabled/disabled, active/inactive, or 1/0 — each
+  series is drawn as a switch rather than a number. Which of the two is "on"
+  is decided by the mapped value, not the text, so a mapping of `1` to
+  `"Down"` renders `"Down"` as the on state.
+
+  Otherwise the first series' last sample is drawn as digits, formatted for
+  the panel's unit and coloured by its thresholds. Panels whose `graphMode` is
+  `"area"` also get that series' history as a sparkline behind the digits.
+
+  Recognised units are `percent`, `percentunit`, `bytes`, `decbytes`, `bits`,
+  `short`, and the durations `s`, `ms` and `ns`; anything else is formatted
+  compactly. Durations are scaled to the largest of weeks, days, hours,
+  minutes or seconds that the value reaches.
+  """
+
+  import Drafter.App,
+    only: [vertical: 2, horizontal: 2, label: 2, digits: 2, switch: 1, placeholder: 1]
 
   alias Drafter.Format
   alias GrafExTerm.Panel.ColorRules
 
+  @doc """
+  Builds the stat widget for `panel`.
+
+  `panel` is a `GrafExTerm.Dashboard.Types.Panel`. `data` must be
+  `{:ok, series}`; anything else draws the panel title above a "No data"
+  placeholder. `height` is the widget height in terminal rows.
+
+  An empty series list is valid and renders as zero. The numeric form reads
+  only the first series; the switch form draws one switch per series.
+
+  Threshold colouring falls back to `{200, 200, 200}` when the panel defines
+  no thresholds, and a step with no colour defaults to green.
+  """
+  @spec render(GrafExTerm.Dashboard.Types.Panel.t(), term(), non_neg_integer()) :: tuple()
   def render(panel, {:ok, series}, height) do
     case boolean_mappings(panel.field_config) do
       {:boolean, on_text, off_text, on_color, off_color} ->
@@ -16,10 +51,13 @@ defmodule GrafExTerm.Panel.Stat do
   end
 
   def render(panel, _, _height) do
-    vertical([
-      label(panel.title, style: %{bold: true}),
-      placeholder(label: "No data")
-    ], [])
+    vertical(
+      [
+        label(panel.title, style: %{bold: true}),
+        placeholder(label: "No data")
+      ],
+      []
+    )
   end
 
   defp render_boolean(panel, series, height, on_text, off_text, on_color, off_color) do
@@ -30,15 +68,18 @@ defmodule GrafExTerm.Panel.Stat do
         series_label = series_display_name(s, panel.title)
         text = if is_on, do: on_text, else: off_text
 
-        horizontal([
-          switch(
-            enabled: is_on,
-            label: "#{series_label}: #{text}",
-            size: :compact,
-            on_color: on_color,
-            off_color: off_color
-          )
-        ], [])
+        horizontal(
+          [
+            switch(
+              enabled: is_on,
+              label: "#{series_label}: #{text}",
+              size: :compact,
+              on_color: on_color,
+              off_color: off_color
+            )
+          ],
+          []
+        )
       end)
 
     vertical(
@@ -58,15 +99,26 @@ defmodule GrafExTerm.Panel.Stat do
       if graph_mode == "area" do
         hist = extract_history(series)
         {bg_min, bg_max} = data_range(panel.field_config)
-        [size: :small, style: %{fg: color}, bg_data: hist, color: color, bg_min: bg_min, bg_max: bg_max]
+
+        [
+          size: :small,
+          style: %{fg: color},
+          bg_data: hist,
+          color: color,
+          bg_min: bg_min,
+          bg_max: bg_max
+        ]
       else
         [size: :small, style: %{fg: color}]
       end
 
-    vertical([
-      label(panel.title, style: %{bold: true}),
-      digits(formatted, digit_opts)
-    ], height: height)
+    vertical(
+      [
+        label(panel.title, style: %{bold: true}),
+        digits(formatted, digit_opts)
+      ],
+      height: height
+    )
   end
 
   defp extract_last_value([]), do: 0.0
@@ -131,14 +183,14 @@ defmodule GrafExTerm.Panel.Stat do
   end
 
   @boolean_pairs MapSet.new([
-    {"true", "false"},
-    {"yes", "no"},
-    {"on", "off"},
-    {"up", "down"},
-    {"enabled", "disabled"},
-    {"active", "inactive"},
-    {"1", "0"}
-  ])
+                   {"true", "false"},
+                   {"yes", "no"},
+                   {"on", "off"},
+                   {"up", "down"},
+                   {"enabled", "disabled"},
+                   {"active", "inactive"},
+                   {"1", "0"}
+                 ])
 
   defp boolean_mappings(field_config) do
     mappings = get_in(field_config, ["defaults", "mappings"]) || []
@@ -146,7 +198,8 @@ defmodule GrafExTerm.Panel.Stat do
     classify_boolean_pair(text_map)
   end
 
-  defp extract_mapping_entries(%{"type" => "value", "options" => options}, acc) when is_map(options) do
+  defp extract_mapping_entries(%{"type" => "value", "options" => options}, acc)
+       when is_map(options) do
     Enum.reduce(options, acc, &extract_value_option/2)
   end
 
@@ -189,8 +242,12 @@ defmodule GrafExTerm.Panel.Stat do
   end
 
   defp build_boolean_result(k2, t1, c1, t2, c2) do
-    {on_text, on_color} = if truthy_key?(k2), do: {t2, resolve_color(c2)}, else: {t1, resolve_color(c1)}
-    {off_text, off_color} = if truthy_key?(k2), do: {t1, resolve_color(c1)}, else: {t2, resolve_color(c2)}
+    {on_text, on_color} =
+      if truthy_key?(k2), do: {t2, resolve_color(c2)}, else: {t1, resolve_color(c1)}
+
+    {off_text, off_color} =
+      if truthy_key?(k2), do: {t1, resolve_color(c1)}, else: {t2, resolve_color(c2)}
+
     {:boolean, on_text, off_text, on_color, off_color}
   end
 

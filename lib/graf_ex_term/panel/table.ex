@@ -1,15 +1,57 @@
 defmodule GrafExTerm.Panel.Table do
-  @moduledoc false
+  @moduledoc """
+  Draws a Grafana `table` panel as a Drafter data table.
+
+  Preparation and rendering are split. `prepare/3` derives rows and columns
+  from fetched data, applies the panel's `organize` transformation and
+  attaches colour functions; `render/6` turns that into a widget. A screen is
+  expected to prepare once when data arrives and render every frame — and
+  `prepare/3` is the only path that applies organize and colouring, so a
+  caller that skips it gets an uncoloured table with unmodified columns.
+
+  Rows are selectable, and selection is reported to the screen as
+  `{:table_row_selected, panel_id}` carrying the selected row maps. Column
+  widths and order changed by the user are reported as
+  `{:table_layout_changed, panel_id}`.
+  """
+
   alias GrafExTerm.Panel.ColorRules
 
-  import Drafter.App, only: [
-    data_table: 1,
-    placeholder: 1,
-    vertical: 2,
-    collapsible: 3,
-    checkbox: 2
-  ]
+  import Drafter.App,
+    only: [
+      data_table: 1,
+      placeholder: 1,
+      vertical: 2,
+      collapsible: 3,
+      checkbox: 2
+    ]
 
+  @doc """
+  Derives the rows and columns to display from fetched panel data.
+
+  `data` is one of:
+
+    * `{:table, columns, rows}` — an instant table already shaped by
+      `GrafExTerm.Refresh.Scheduler`; columns and rows are used as given
+    * `{:ok, series}` — range series, which are flattened to one row per
+      sample with a formatted `:time`, a `:value` rounded to two decimals, and
+      one column per metric label. The result is capped at 100 rows.
+    * anything else — yields `{[], []}`
+
+  `organize` is a panel's `:organize` map, `%{exclude: map, rename: map,
+  index: map}`, keyed by lowercased column name. Columns marked `true` under
+  `exclude` are dropped, `rename` replaces labels, and `index` sets the order,
+  with unlisted columns sorted to the end. Defaults to `nil`, which leaves
+  columns as derived.
+
+  `field_config` is the panel's raw Grafana `fieldConfig`, used to attach a
+  `:color_fn` to each column that has thresholds or value mappings. Defaults
+  to `%{}`, which attaches none.
+
+  Returns `{rows, columns}`. Rows are maps keyed by column key; columns are
+  maps with `:key`, `:label`, `:width` and optionally `:color_fn`.
+  """
+  @spec prepare(term(), map() | nil, map()) :: {[map()], [map()]}
   def prepare(data, organize \\ nil, field_config \\ %{})
 
   def prepare({:table, columns, rows}, organize, field_config) do
@@ -25,9 +67,43 @@ defmodule GrafExTerm.Panel.Table do
 
   def prepare(_, _, _), do: {[], []}
 
+  @doc """
+  Builds the table widget for `panel`.
+
+  `panel` is a `GrafExTerm.Dashboard.Types.Panel`; its `:id` becomes the
+  widget id `:"data_table_<id>"`. `data` is either `{:prepared, rows,
+  columns}` wrapping the output of `prepare/3`, or a raw `{:ok, series}`,
+  which is prepared inline without organize or colouring; anything else draws
+  a "No data" placeholder. `height` is the widget height in terminal rows.
+
+  `visible_columns` is a `MapSet` of column keys to show. `nil` or an empty
+  set shows every column. Defaults to `nil`.
+
+  `layout` is `%{col_widths: widths, col_order: order}` restoring a user's
+  column sizing, or `nil` to let the table size itself. Defaults to `nil`.
+
+  `column_filter` adds a collapsible "Columns" checkbox list above the table.
+  It consumes up to 8 rows of `height`, and the table is never left with fewer
+  than 3. Defaults to `false`.
+  """
+  @spec render(
+          GrafExTerm.Dashboard.Types.Panel.t(),
+          term(),
+          non_neg_integer(),
+          MapSet.t() | nil,
+          map() | nil,
+          boolean()
+        ) :: tuple()
   def render(panel, data, height, visible_columns \\ nil, layout \\ nil, column_filter \\ false)
 
-  def render(panel, {:prepared, rows, all_columns}, height, visible_columns, layout, column_filter) do
+  def render(
+        panel,
+        {:prepared, rows, all_columns},
+        height,
+        visible_columns,
+        layout,
+        column_filter
+      ) do
     render_table(panel, rows, all_columns, height, visible_columns, layout, column_filter)
   end
 
@@ -48,25 +124,43 @@ defmodule GrafExTerm.Panel.Table do
         Enum.filter(all_columns, fn c -> MapSet.member?(visible_columns, c.key) end)
       end
 
-    layout_opts = if layout do
-      [col_widths: layout.col_widths, col_order: layout.col_order]
-    else
-      []
-    end
+    layout_opts =
+      if layout do
+        [col_widths: layout.col_widths, col_order: layout.col_order]
+      else
+        []
+      end
 
     if column_filter do
-      render_table_with_filter(panel, rows, all_columns, active_columns, height, visible_columns, layout_opts)
+      render_table_with_filter(
+        panel,
+        rows,
+        all_columns,
+        active_columns,
+        height,
+        visible_columns,
+        layout_opts
+      )
     else
       render_table_plain(panel, rows, active_columns, height, layout_opts)
     end
   end
 
-  defp render_table_with_filter(panel, rows, all_columns, active_columns, height, visible_columns, layout_opts) do
+  defp render_table_with_filter(
+         panel,
+         rows,
+         all_columns,
+         active_columns,
+         height,
+         visible_columns,
+         layout_opts
+       ) do
     col_count = length(all_columns)
 
     checkboxes =
       Enum.map(all_columns, fn c ->
         checked = visible_columns == nil or MapSet.member?(visible_columns, c.key)
+
         checkbox(c.label,
           id: :"col_#{panel.id}_#{c.key}",
           checked: checked,
@@ -124,8 +218,10 @@ defmodule GrafExTerm.Panel.Table do
   end
 
   defp attach_color_fns(columns, field_config) when map_size(field_config) == 0, do: columns
+
   defp attach_color_fns(columns, field_config) do
     color_map = ColorRules.build(field_config, columns)
+
     Enum.map(columns, fn col ->
       case Map.get(color_map, col.key) do
         nil -> col

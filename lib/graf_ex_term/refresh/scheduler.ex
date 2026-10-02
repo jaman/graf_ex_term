@@ -1,5 +1,43 @@
 defmodule GrafExTerm.Refresh.Scheduler do
-  @moduledoc false
+  @moduledoc """
+  Per-dashboard process that queries every visible panel on a timer and
+  publishes the results.
+
+  One is started under `GrafExTerm.RefreshSupervisor` for each dashboard the
+  user opens and registered in `GrafExTerm.RefreshRegistry` under the
+  dashboard uid, so callers address it by uid. It fetches once immediately on
+  start and then on its interval.
+
+  Each fetch writes to `GrafExTerm.Refresh.DataCache` and broadcasts
+  `{:data_refreshed, uid, panel_data}` on the `"dashboard:<uid>"` PubSub
+  topic. `panel_data` maps panel id to `{:ok, series}`, `{:table, columns,
+  rows}` or `{:error, :no_data}`.
+
+  Only panels that are actually visible are queried. Row panels are never
+  queried, and panels under a collapsed row are skipped, so a caller must keep
+  the scheduler's idea of collapsed rows current with `set_collapsed_rows/2`
+  or it will keep querying panels the user cannot see. The set starts empty,
+  meaning everything is queried, even if the screen opens with rows collapsed.
+
+  Query window and step come from the application environment:
+  `:time_range_seconds` (default 3600) back from now, divided into
+  `:chart_resolution` (default 300) samples, with a step of at least one
+  second. The Grafana built-ins `__rate_interval`, `__interval`,
+  `__interval_ms`, `__range`, `__range_s`, `__range_ms`, `__from` and `__to`
+  are derived from that window and merged under the user's variable values, so
+  a dashboard variable of the same name wins.
+
+  A target is fetched as an instant table when it is marked `instant` with
+  format `"table"`; several such targets on one panel are joined on their
+  label sets into a single table, one value column per target. Everything else
+  is a range query producing series named from the target's legend format.
+  Panel `overrides` carrying a `negative-Y` transform negate the matching
+  series, by exact name or by regexp.
+
+  A panel whose targets all fail yields `{:error, :no_data}`; partial failure
+  keeps the successful targets.
+  """
+
   use GenServer
 
   alias GrafExTerm.Dashboard.Store
@@ -7,16 +45,51 @@ defmodule GrafExTerm.Refresh.Scheduler do
   alias GrafExTerm.Refresh.DataCache
   alias GrafExTerm.Variable.{Manager, Substitution}
 
+  @doc """
+  Starts a scheduler for `dashboard` and performs the first fetch.
+
+  `dashboard` is a `GrafExTerm.Dashboard.Types.Dashboard`. The process is
+  registered under `dashboard.uid`, so starting a second one for the same uid
+  returns `{:error, {:already_started, pid}}`.
+
+  The interval comes from `dashboard.refresh`, parsed from a trailing `s`, `m`
+  or `h`. `false`, `nil`, `""` and anything unparseable fall back to the
+  `:default_refresh_ms` application environment value, which defaults to
+  30_000.
+
+  The first fetch runs in `handle_continue/2`, so this call returns before any
+  data is available.
+  """
+  @spec start_link(GrafExTerm.Dashboard.Types.Dashboard.t()) :: GenServer.on_start()
   def start_link(dashboard) do
     name = {:via, Registry, {GrafExTerm.RefreshRegistry, dashboard.uid}}
     GenServer.start_link(__MODULE__, dashboard, name: name)
   end
 
+  @doc """
+  Triggers an immediate fetch for `dashboard_uid` without disturbing the
+  timer.
+
+  Asynchronous — returns before the fetch runs. Exits if no scheduler is
+  running for that dashboard.
+  """
+  @spec refresh_now(String.t()) :: :ok
   def refresh_now(dashboard_uid) do
     name = {:via, Registry, {GrafExTerm.RefreshRegistry, dashboard_uid}}
     GenServer.cast(name, :refresh_now)
   end
 
+  @doc """
+  Tells the scheduler which rows are collapsed so their panels stop being
+  queried.
+
+  `collapsed_rows` is a `MapSet` of row panel ids and replaces the previous
+  set entirely. It takes effect on the next fetch, not immediately; pair it
+  with `refresh_now/1` to repopulate panels a row has just revealed.
+
+  Asynchronous. Exits if no scheduler is running for that dashboard.
+  """
+  @spec set_collapsed_rows(String.t(), MapSet.t()) :: :ok
   def set_collapsed_rows(dashboard_uid, collapsed_rows) do
     name = {:via, Registry, {GrafExTerm.RefreshRegistry, dashboard_uid}}
     GenServer.cast(name, {:set_collapsed_rows, collapsed_rows})
@@ -30,7 +103,8 @@ defmodule GrafExTerm.Refresh.Scheduler do
       Process.send_after(self(), :tick, interval_ms)
     end
 
-    {:ok, %{dashboard: dashboard, interval_ms: interval_ms, collapsed_rows: MapSet.new()}, {:continue, :initial_fetch}}
+    {:ok, %{dashboard: dashboard, interval_ms: interval_ms, collapsed_rows: MapSet.new()},
+     {:continue, :initial_fetch}}
   end
 
   @impl GenServer
@@ -63,7 +137,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
 
   defp fetch_and_broadcast(dashboard, collapsed_rows) do
     user_vars = fetch_vars(dashboard.uid)
-    app_datasources = Application.get_env(:graf_ex_term, :datasources, %{})
+    app_datasources = merge_source_override(dashboard.uid)
     stored_datasource_map = Store.get_datasource_map(dashboard.uid)
     now = System.system_time(:second)
     time_range = Application.get_env(:graf_ex_term, :time_range_seconds, 3600)
@@ -79,7 +153,9 @@ defmodule GrafExTerm.Refresh.Scheduler do
       |> Enum.reject(fn p -> p.type == "row" end)
       |> Enum.filter(fn p -> MapSet.member?(active_panel_ids, p.id) end)
       |> Enum.map(fn panel ->
-        results = fetch_panel_data(panel, vars, app_datasources, stored_datasource_map, from, now, step)
+        results =
+          fetch_panel_data(panel, vars, app_datasources, stored_datasource_map, from, now, step)
+
         {panel.id, results}
       end)
       |> Map.new()
@@ -105,7 +181,9 @@ defmodule GrafExTerm.Refresh.Scheduler do
   end
 
   defp classify_panel(_panel, {acc, true}, _collapsed_rows), do: {acc, true}
-  defp classify_panel(panel, {acc, false}, _collapsed_rows), do: {MapSet.put(acc, panel.id), false}
+
+  defp classify_panel(panel, {acc, false}, _collapsed_rows),
+    do: {MapSet.put(acc, panel.id), false}
 
   defp fetch_vars(dashboard_uid) do
     Manager.get_values(dashboard_uid)
@@ -133,13 +211,23 @@ defmodule GrafExTerm.Refresh.Scheduler do
     results =
       panel.targets
       |> Enum.map(fn target ->
-        fetch_target_series(target, vars, app_datasources, stored_datasource_map, from, to, step, overrides)
+        fetch_target_series(
+          target,
+          vars,
+          app_datasources,
+          stored_datasource_map,
+          from,
+          to,
+          step,
+          overrides
+        )
       end)
 
-    successful = Enum.filter(results, fn
-      {:ok, _} -> true
-      _ -> false
-    end)
+    successful =
+      Enum.filter(results, fn
+        {:ok, _} -> true
+        _ -> false
+      end)
 
     if Enum.empty?(successful) do
       {:error, :no_data}
@@ -149,13 +237,28 @@ defmodule GrafExTerm.Refresh.Scheduler do
     end
   end
 
-  defp fetch_target_series(target, vars, app_datasources, stored_datasource_map, from, to, step, overrides) do
+  defp fetch_target_series(
+         target,
+         vars,
+         app_datasources,
+         stored_datasource_map,
+         from,
+         to,
+         step,
+         overrides
+       ) do
     expr = Substitution.substitute(target.expr, vars)
-    config = resolve_datasource(target.datasource_ref, vars, app_datasources, stored_datasource_map)
+
+    config =
+      resolve_datasource(target.datasource_ref, vars, app_datasources, stored_datasource_map)
 
     case Prometheus.query(config, expr, {from, to}, step) do
       {:ok, series} ->
-        named = Enum.map(series, fn s -> Map.put(s, :name, format_series_name(target.legend_format, s.labels)) end)
+        named =
+          Enum.map(series, fn s ->
+            Map.put(s, :name, format_series_name(target.legend_format, s.labels))
+          end)
+
         {:ok, apply_series_overrides(named, overrides)}
 
       error ->
@@ -205,11 +308,15 @@ defmodule GrafExTerm.Refresh.Scheduler do
 
     if has_negative_y do
       case get_in(override, ["matcher", "id"]) do
-        "byName" -> [{:exact, get_in(override, ["matcher", "options"])}]
+        "byName" ->
+          [{:exact, get_in(override, ["matcher", "options"])}]
+
         "byRegexp" ->
           pattern = get_in(override, ["matcher", "options"])
           [{:regex, Regex.compile!(String.slice(pattern, 1..-2//1))}]
-        _ -> []
+
+        _ ->
+          []
       end
     else
       []
@@ -229,7 +336,10 @@ defmodule GrafExTerm.Refresh.Scheduler do
     target_results =
       Enum.map(panel.targets, fn target ->
         expr = Substitution.substitute(target.expr, vars)
-        config = resolve_datasource(target.datasource_ref, vars, app_datasources, stored_datasource_map)
+
+        config =
+          resolve_datasource(target.datasource_ref, vars, app_datasources, stored_datasource_map)
+
         {target, Prometheus.instant_query(config, expr, now)}
       end)
 
@@ -305,6 +415,16 @@ defmodule GrafExTerm.Refresh.Scheduler do
   defp col_name(%{ref_id: ref}, true), do: "Value ##{ref}"
   defp col_name(_target, false), do: "Value"
 
+  defp merge_source_override(dashboard_uid) do
+    app_datasources = Application.get_env(:graf_ex_term, :datasources, %{})
+
+    case Store.get_source(dashboard_uid) do
+      nil -> app_datasources
+      "" -> app_datasources
+      url -> Map.put(app_datasources, "prometheus", %{type: :prometheus, url: url})
+    end
+  end
+
   defp default_datasource(app_datasources) do
     Map.get(app_datasources, "prometheus", %{url: "http://localhost:9090"})
   end
@@ -347,6 +467,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
   defp builtin_vars(from, to, step) do
     range_s = to - from
     rate_interval = max(step * 4, 60)
+
     %{
       "__rate_interval" => "#{rate_interval}s",
       "__interval" => "#{step}s",

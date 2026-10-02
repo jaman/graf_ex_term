@@ -1,6 +1,6 @@
 # GrafExTerm
 
-A terminal UI for Grafana dashboards, built on [Drafter](https://github.com/your-org/drafter).
+A terminal UI for Grafana dashboards, built on [Drafter](https://github.com/jaman/drafter).
 
 GrafExTerm reads Grafana dashboard JSON directly — no Grafana server required at runtime for layout — and queries your Prometheus datasources live. It renders panels as interactive terminal widgets: tables with sortable/resizable columns, timeseries charts, stat panels with sparkline backgrounds, gauges, and more.
 
@@ -36,38 +36,30 @@ GrafExTerm reads Grafana dashboard JSON directly — no Grafana server required 
 ## Requirements
 
 - Elixir ~> 1.18
-- Drafter (path dependency — see below)
 - A Prometheus-backed Grafana dashboard exported as JSON
 
 ## Installation
 
-GrafExTerm is not currently published to Hex. Clone alongside Drafter:
-
-```
-git clone https://github.com/your-org/drafter
-git clone https://github.com/your-org/graf_ex_term
-```
-
-`mix.exs` expects Drafter at `../drafter` relative to the project root.
+Add GrafExTerm to a project:
 
 ```elixir
 def deps do
   [
-    {:drafter, path: "../drafter"},
-    {:req, "~> 0.5"},
-    {:jason, "~> 1.4"},
-    {:cachex, "~> 3.6"}
+    {:graf_ex_term, "~> 0.1.0"}
   ]
 end
 ```
 
-Then:
+Or run it from a clone:
 
 ```
+git clone https://github.com/jaman/graf_ex_term
 cd graf_ex_term
 mix deps.get
 mix run --no-halt
 ```
+
+When a `drafter` checkout sits next to `graf_ex_term`, it is used in place of the Hex package.
 
 ## Configuration
 

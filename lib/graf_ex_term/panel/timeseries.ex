@@ -1,5 +1,25 @@
 defmodule GrafExTerm.Panel.Timeseries do
-  @moduledoc false
+  @moduledoc """
+  Draws Grafana `timeseries` and `graph` panels as braille area or bar charts.
+
+  Preparation and rendering are split. `prepare/2` does the work that depends
+  only on the data — unit scaling, ordering, axis options — so a screen can do
+  it once when data arrives rather than on every frame; `render/3` turns the
+  prepared result into a widget. Calling `render/3` on raw `{:ok, series}`
+  prepares it first, so the split is an optimisation the caller may skip.
+
+  Series are drawn back to front by average magnitude, smallest first, so
+  larger areas do not hide smaller ones. A series carrying a `:weight` above 1
+  — the marker `GrafExTerm.Refresh.SeriesClusterer` puts on a merged cluster —
+  is drawn with an opacity proportional to how many series it stands for.
+
+  Units drive the y-axis. `percentunit` values are multiplied by 100 and the
+  axis pinned to 0..100; `percent` is pinned without scaling; byte and bit
+  units are divided down to the largest SI step the peak reaches and labelled
+  with the matching per-second suffix. Explicit `min`/`max` from the panel's
+  `fieldConfig` are applied for every unit except `percentunit`.
+  """
+
   import Drafter.App, only: [chart: 2, placeholder: 1]
 
   @palette [
@@ -11,6 +31,17 @@ defmodule GrafExTerm.Panel.Timeseries do
     {180, 100, 255}
   ]
 
+  @doc """
+  Converts fetched series into the values and chart options `render/3` needs.
+
+  `panel` is a `GrafExTerm.Dashboard.Types.Panel`. `data` is `{:ok, series}`;
+  anything else is returned unchanged, so error tuples pass through to
+  `render/3` and become a placeholder there.
+
+  Returns `{:prepared_ts, %{values: values, opts: opts}}`. The chart type is
+  `:bar` when the panel sets `drawStyle` to `"bars"` and `:braille_area`
+  otherwise.
+  """
   @spec prepare(map(), {:ok, list()} | any()) :: {:prepared_ts, map()} | any()
   def prepare(panel, {:ok, series}) do
     unit = get_in(panel.field_config, ["defaults", "unit"]) || ""
@@ -24,11 +55,12 @@ defmodule GrafExTerm.Panel.Timeseries do
 
     braille_opts =
       if type == :braille_area do
-        fill = cond do
-          has_weights -> 0.6
-          num_series > 3 -> 0.6
-          true -> 1.0
-        end
+        fill =
+          cond do
+            has_weights -> 0.6
+            num_series > 3 -> 0.6
+            true -> 1.0
+          end
 
         [show_baseline: true, fill_opacity: fill, zero_center: :independent]
       else
@@ -47,6 +79,16 @@ defmodule GrafExTerm.Panel.Timeseries do
 
   def prepare(_panel, other), do: other
 
+  @doc """
+  Builds the chart widget for `panel`.
+
+  `panel` is a `GrafExTerm.Dashboard.Types.Panel`, and its `:id` becomes the
+  widget id `:"chart_<id>"`. `data` is either a `{:prepared_ts, map}` from
+  `prepare/2` or a raw `{:ok, series}`, which is prepared inline; anything
+  else draws a "No data" placeholder. `height` is the widget height in
+  terminal rows.
+  """
+  @spec render(GrafExTerm.Dashboard.Types.Panel.t(), term(), non_neg_integer()) :: tuple()
   def render(panel, {:prepared_ts, %{values: values, opts: opts}}, height) do
     chart(values, [{:id, :"chart_#{panel.id}"}, {:height, height} | opts])
   end

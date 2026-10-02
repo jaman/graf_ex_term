@@ -14,8 +14,8 @@ defmodule GrafExTerm.MixProject do
       package: package(),
       docs: docs(),
       releases: releases(),
-      source_url: "https://github.com/your-org/graf_ex_term",
-      homepage_url: "https://github.com/your-org/graf_ex_term"
+      source_url: "https://github.com/jaman/graf_ex_term",
+      homepage_url: "https://github.com/jaman/graf_ex_term"
     ]
   end
 
@@ -31,7 +31,7 @@ defmodule GrafExTerm.MixProject do
 
   defp deps do
     [
-      {:drafter, github: "jaman/drafter"},
+      family(:drafter, "~> 0.4.0", "../drafter"),
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:phoenix_pubsub, "~> 2.1"},
@@ -40,6 +40,12 @@ defmodule GrafExTerm.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
+  end
+
+  defp family(app, requirement, path) do
+    if System.get_env("PLUMB_HEX") == nil and File.dir?(Path.expand(path, __DIR__)),
+      do: {app, path: path},
+      else: {app, requirement}
   end
 
   defp releases do
@@ -71,15 +77,15 @@ defmodule GrafExTerm.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/your-org/graf_ex_term"},
-      files: ~w(lib config mix.exs README.md LICENSE)
+      links: %{"GitHub" => "https://github.com/jaman/graf_ex_term"},
+      files: ~w(lib config mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
   defp docs do
     [
       main: "readme",
-      extras: ["README.md"],
+      extras: ["README.md", "CHANGELOG.md"],
       groups_for_modules: [
         Dashboard: [
           GrafExTerm.Dashboard.Loader,

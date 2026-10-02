@@ -1,5 +1,22 @@
 defmodule Mix.Tasks.DumpLayout do
-  @moduledoc false
+  @moduledoc """
+  Generates a standalone Drafter script that reproduces a Grafana dashboard's
+  layout.
+
+      mix dump_layout path/to/dashboard.json
+
+  Writes `generated_layout.exs` in the current directory, overwriting it.
+
+  The output is layout only. Every panel becomes a placeholder captioned with
+  its type and title, except timeseries and graph panels, which get a chart
+  fed from a fixed sine wave. Nothing queries a datasource, and rows are
+  emitted collapsed with an inert toggle.
+
+  The generated script begins with a `Mix.install/1` pointing at `../drafter`
+  relative to itself, so it runs only from a directory alongside a Drafter
+  checkout.
+  """
+
   use Mix.Task
 
   alias GrafExTerm.Dashboard.Parser
@@ -33,7 +50,9 @@ defmodule Mix.Tasks.DumpLayout do
   end
 
   defp accumulate_section(%{type: "row"} = panel, {sections, current_row, current_panels}) do
-    finished = if current_row || current_panels != [], do: [{current_row, current_panels}], else: []
+    finished =
+      if current_row || current_panels != [], do: [{current_row, current_panels}], else: []
+
     {sections ++ finished, panel, []}
   end
 
@@ -70,7 +89,11 @@ defmodule Mix.Tasks.DumpLayout do
     |> Enum.group_by(fn p -> p.grid_pos.y end)
     |> Enum.sort_by(fn {y, _} -> y end)
     |> Enum.map_join(",\n", fn {_, row_panels} ->
-      row_height = row_panels |> Enum.map(fn p -> p.grid_pos.h end) |> Enum.max(fn -> 8 end) |> Kernel.*(height_ratio)
+      row_height =
+        row_panels
+        |> Enum.map(fn p -> p.grid_pos.h end)
+        |> Enum.max(fn -> 8 end)
+        |> Kernel.*(height_ratio)
 
       widgets_code =
         row_panels
@@ -97,15 +120,29 @@ defmodule Mix.Tasks.DumpLayout do
 
   defp panel_to_code(panel, height) do
     case panel.type do
-      "stat" -> ~s|placeholder(label: "stat: #{esc(panel.title)}", height: #{height})|
-      "table" -> ~s|placeholder(label: "table: #{esc(panel.title)}", height: #{height})|
-      "gauge" -> ~s|placeholder(label: "gauge: #{esc(panel.title)}", height: #{height})|
-      "bargauge" -> ~s|placeholder(label: "bargauge: #{esc(panel.title)}", height: #{height})|
-      "text" -> ~s|placeholder(label: "text: #{esc(panel.title)}", height: #{height})|
-      "row" -> ~s|placeholder(label: "row: #{esc(panel.title)}", height: 1)|
+      "stat" ->
+        ~s|placeholder(label: "stat: #{esc(panel.title)}", height: #{height})|
+
+      "table" ->
+        ~s|placeholder(label: "table: #{esc(panel.title)}", height: #{height})|
+
+      "gauge" ->
+        ~s|placeholder(label: "gauge: #{esc(panel.title)}", height: #{height})|
+
+      "bargauge" ->
+        ~s|placeholder(label: "bargauge: #{esc(panel.title)}", height: #{height})|
+
+      "text" ->
+        ~s|placeholder(label: "text: #{esc(panel.title)}", height: #{height})|
+
+      "row" ->
+        ~s|placeholder(label: "row: #{esc(panel.title)}", height: 1)|
+
       type when type in ["timeseries", "graph"] ->
         ~s|chart(@chart_data, chart_type: :braille_area, show_baseline: true, title: "#{esc(panel.title)}", height: #{height})|
-      _ -> ~s|placeholder(label: "#{esc(panel.type)}: #{esc(panel.title)}", height: #{height})|
+
+      _ ->
+        ~s|placeholder(label: "#{esc(panel.type)}: #{esc(panel.title)}", height: #{height})|
     end
   end
 
@@ -113,7 +150,10 @@ defmodule Mix.Tasks.DumpLayout do
     panels
     |> Enum.group_by(fn p -> p.grid_pos.y end)
     |> Enum.map(fn {_, row_panels} ->
-      row_panels |> Enum.map(fn p -> p.grid_pos.h end) |> Enum.max(fn -> 8 end) |> Kernel.*(height_ratio)
+      row_panels
+      |> Enum.map(fn p -> p.grid_pos.h end)
+      |> Enum.max(fn -> 8 end)
+      |> Kernel.*(height_ratio)
     end)
     |> Enum.sum()
   end
