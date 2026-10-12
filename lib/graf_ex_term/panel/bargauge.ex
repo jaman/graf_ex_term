@@ -1,72 +1,96 @@
 defmodule GrafExTerm.Panel.Bargauge do
   @moduledoc """
-  Draws a Grafana `bargauge` panel as one labelled progress bar per series,
-  stacked vertically.
+  Draws a Grafana `bargauge` panel as one labelled meter per series, stacked
+  vertically.
+
+  Each meter shows the series reduced by the panel's
+  `options.reduceOptions.calcs` (see `GrafExTerm.Panel.Reduce`) as a fraction
+  of `fieldConfig.defaults.min`..`max`, which default to `0`..`100`. The fill
+  is coloured by the panel's threshold steps; a panel without thresholds uses
+  the meter's own green, amber and red bands.
   """
 
-  import Drafter.App,
-    only: [vertical: 1, horizontal: 2, label: 1, progress_bar: 1, placeholder: 1]
+  import Drafter.App, only: [vertical: 1, meter: 1, placeholder: 1]
+
+  alias GrafExTerm.Panel.{ColorRules, Reduce}
+
+  @rows_per_meter 2
 
   @doc """
-  Builds the bar widgets for `panel`.
+  Builds the meter widgets for `panel`.
 
   `panel` is a `GrafExTerm.Dashboard.Types.Panel`. `data` must be
   `{:ok, series}` with at least one series; every other value, including
   `{:ok, []}`, draws a "No data" placeholder of `height` rows.
 
-  `height` also caps how many series are drawn: one bar per row, so series
-  beyond the first `height` are dropped rather than overflowing.
-
-  Each bar shows the series' last sample against the panel's
-  `fieldConfig.defaults.max`, which defaults to `100`, with the percentage
-  written alongside. Bars are labelled with the series `:name`, falling back
-  to its label values joined with `", "`.
+  Each meter takes two rows, so `height` caps the number of series drawn and
+  series beyond that are dropped rather than overflowing. Meters are labelled
+  with the series `:name`, falling back to its label values joined with
+  `", "`.
   """
   @spec render(GrafExTerm.Dashboard.Types.Panel.t(), term(), non_neg_integer()) :: tuple()
   def render(panel, {:ok, series}, height) when series != [] do
-    max_val = get_max(panel.field_config)
+    {min_val, max_val} = bounds(panel.field_config)
+    calc = Reduce.calc(panel)
+    thresholds = meter_thresholds(panel.field_config, min_val, max_val)
 
-    bars =
-      series
-      |> Enum.take(height)
-      |> Enum.map(fn s ->
-        value = last_value(s.values)
+    series
+    |> Enum.take(max(1, div(height, @rows_per_meter)))
+    |> Enum.map(fn s ->
+      value = Reduce.value(s.values, calc)
 
-        series_label =
-          case Map.get(s, :name) do
-            name when is_binary(name) and name != "" -> name
-            _ -> s.labels |> Map.values() |> Enum.join(", ")
-          end
-
-        horizontal(
-          [
-            label(series_label),
-            progress_bar(progress: value, max_value: max_val, show_percentage: true)
-          ],
-          gap: 1
-        )
-      end)
-
-    vertical(bars)
+      meter(
+        [
+          value: fraction(value, min_val, max_val),
+          label: "#{series_label(s)}  #{format_value(value)}"
+        ] ++ thresholds
+      )
+    end)
+    |> vertical()
   end
 
   def render(_panel, _, height) do
     placeholder(label: "No data", height: height)
   end
 
-  defp last_value([]), do: 0.0
-
-  defp last_value(values) do
-    {_ts, val} = List.last(values)
-    val
+  defp bounds(field_config) do
+    defaults = Map.get(field_config, "defaults", %{})
+    min_val = number_or(Map.get(defaults, "min"), 0)
+    max_val = number_or(Map.get(defaults, "max"), 100)
+    if max_val > min_val, do: {min_val, max_val}, else: {min_val, min_val + 1}
   end
 
-  defp get_max(field_config) do
-    field_config
-    |> get_in(["defaults", "max"])
-    |> case do
-      nil -> 100
-      max -> max
+  defp number_or(value, _default) when is_number(value), do: value
+  defp number_or(_value, default), do: default
+
+  defp fraction(value, min_val, max_val), do: (value - min_val) / (max_val - min_val)
+
+  defp meter_thresholds(field_config, min_val, max_val) do
+    steps = ColorRules.threshold_steps(field_config)
+
+    if Enum.any?(steps, fn {value, color} -> is_number(value) and color != nil end) do
+      [thresholds: step_bands(steps, min_val, max_val)]
+    else
+      []
     end
   end
+
+  defp step_bands(steps, min_val, max_val) do
+    colors = Enum.map(steps, fn {_value, color} -> color || {115, 191, 105} end)
+
+    starts =
+      steps |> tl() |> Enum.map(fn {value, _} -> fraction(value || min_val, min_val, max_val) end)
+
+    Enum.zip(starts ++ [1.0], colors)
+  end
+
+  defp series_label(s) do
+    case Map.get(s, :name) do
+      name when is_binary(name) and name != "" -> name
+      _ -> s.labels |> Map.values() |> Enum.join(", ")
+    end
+  end
+
+  defp format_value(value) when abs(value) >= 100, do: :erlang.float_to_binary(value, decimals: 0)
+  defp format_value(value), do: :erlang.float_to_binary(value, decimals: 2)
 end

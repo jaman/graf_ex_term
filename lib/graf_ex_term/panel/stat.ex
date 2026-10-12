@@ -11,8 +11,12 @@ defmodule GrafExTerm.Panel.Stat do
   `"Down"` renders `"Down"` as the on state.
 
   Otherwise the first series' last sample is drawn as digits, formatted for
-  the panel's unit and coloured by its thresholds. Panels whose `graphMode` is
-  `"area"` also get that series' history as a sparkline behind the digits.
+  the panel's unit and coloured by its thresholds, in the first font of the
+  `:stat_fonts` application environment list that fits the panel. Names that
+  are not in `Drafter.Widget.Digits.Font.names/0` are skipped; with none left
+  the list is `[:braille, :mini, :compact]`. Panels whose `graphMode` is
+  `"area"` also get that series' history as a darker sparkline behind the
+  digits. Numbers are centred in the panel.
 
   Recognised units are `percent`, `percentunit`, `bytes`, `decbytes`, `bits`,
   `short`, and the durations `s`, `ms` and `ns`; anything else is formatted
@@ -21,17 +25,18 @@ defmodule GrafExTerm.Panel.Stat do
   """
 
   import Drafter.App,
-    only: [vertical: 2, horizontal: 2, label: 2, digits: 2, switch: 1, placeholder: 1]
+    only: [vertical: 2, horizontal: 2, digits: 2, switch: 1, placeholder: 1]
 
   alias Drafter.Format
+  alias Drafter.Widget.Digits.Font
   alias GrafExTerm.Panel.ColorRules
 
   @doc """
   Builds the stat widget for `panel`.
 
   `panel` is a `GrafExTerm.Dashboard.Types.Panel`. `data` must be
-  `{:ok, series}`; anything else draws the panel title above a "No data"
-  placeholder. `height` is the widget height in terminal rows.
+  `{:ok, series}`; anything else draws a "No data" placeholder. `height` is
+  the widget height in terminal rows.
 
   An empty series list is valid and renders as zero. The numeric form reads
   only the first series; the switch form draws one switch per series.
@@ -50,12 +55,9 @@ defmodule GrafExTerm.Panel.Stat do
     end
   end
 
-  def render(panel, _, _height) do
+  def render(_panel, _, _height) do
     vertical(
-      [
-        label(panel.title, style: %{bold: true}),
-        placeholder(label: "No data")
-      ],
+      [placeholder(label: "No data")],
       []
     )
   end
@@ -83,7 +85,7 @@ defmodule GrafExTerm.Panel.Stat do
       end)
 
     vertical(
-      [label(panel.title, style: %{bold: true}) | switches],
+      switches,
       height: height
     )
   end
@@ -101,25 +103,45 @@ defmodule GrafExTerm.Panel.Stat do
         {bg_min, bg_max} = data_range(panel.field_config)
 
         [
-          size: :small,
+          fit: number_fonts(),
+          flex: 1,
+          align: :center,
           style: %{fg: color},
           bg_data: hist,
-          color: color,
+          color: dim(color),
           bg_min: bg_min,
           bg_max: bg_max
         ]
       else
-        [size: :small, style: %{fg: color}]
+        [fit: number_fonts(), flex: 1, align: :center, style: %{fg: color}]
       end
 
     vertical(
-      [
-        label(panel.title, style: %{bold: true}),
-        digits(formatted, digit_opts)
-      ],
+      [digits(formatted, digit_opts)],
       height: height
     )
   end
+
+  @default_number_fonts [:braille, :mini, :compact]
+
+  defp number_fonts do
+    known = Font.names()
+
+    case :graf_ex_term
+         |> Application.get_env(:stat_fonts)
+         |> List.wrap()
+         |> Enum.filter(&(&1 in known)) do
+      [] -> @default_number_fonts
+      fonts -> fonts
+    end
+  end
+
+  @sparkline_brightness 0.45
+
+  defp dim({r, g, b}),
+    do:
+      {round(r * @sparkline_brightness), round(g * @sparkline_brightness),
+       round(b * @sparkline_brightness)}
 
   defp extract_last_value([]), do: 0.0
 

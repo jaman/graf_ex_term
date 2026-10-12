@@ -4,11 +4,11 @@ defmodule GrafExTerm.Dashboard.Store do
   user settings, persisted to disk.
 
   Registering a dashboard fetches and parses it, caches the parsed
-  `GrafExTerm.Dashboard.Types.Dashboard` in Cachex under its uid, and appends
-  an entry to `$XDG_CONFIG_HOME/graf_ex_term/dashboards.json`
-  (`~/.config/graf_ex_term/dashboards.json` when that variable is unset). The
-  file records the source URI and settings, not the dashboard itself, so every
-  dashboard is re-fetched and re-parsed at startup and a source that has
+  `GrafExTerm.Dashboard.Types.Dashboard` in an ETS table under its uid, and appends
+  an entry to `<dir>/graf_ex_term/dashboards.json`, where `<dir>` is the
+  `:store_dir` application environment value when set, then `$XDG_CONFIG_HOME`,
+  then `~/.config`. The file records the source URI and settings, not the
+  dashboard itself, so every dashboard is re-fetched and re-parsed at startup and a source that has
   become unreachable is silently dropped from the list.
 
   Settings are per dashboard uid: `:datasource_map`, `:source`,
@@ -224,23 +224,23 @@ defmodule GrafExTerm.Dashboard.Store do
   @doc """
   Returns the parsed dashboard `uid` from the cache.
 
-  Returns `{:ok, dashboard}` or `{:error, :not_found}`. Reads Cachex directly
-  rather than the store process, so it does not queue behind a pending
-  `add/1`.
+  Returns `{:ok, dashboard}` or `{:error, :not_found}`. Reads the store's ETS
+  table directly rather than calling the store process, so it does not queue
+  behind a pending `add/1`.
   """
   @spec get_dashboard(String.t()) ::
           {:ok, GrafExTerm.Dashboard.Types.Dashboard.t()} | {:error, :not_found}
   def get_dashboard(uid) do
-    case Cachex.get(@cache, uid) do
-      {:ok, nil} -> {:error, :not_found}
-      {:ok, dashboard} -> {:ok, dashboard}
-      _ -> {:error, :not_found}
+    case :ets.lookup(@cache, uid) do
+      [{^uid, dashboard}] -> {:ok, dashboard}
+      [] -> {:error, :not_found}
     end
   end
 
   def init(_) do
+    :ets.new(@cache, [:named_table, :protected, :set, read_concurrency: true])
     entries = load_persisted()
-    Enum.each(entries, fn entry -> Cachex.put(@cache, entry.uid, entry.dashboard) end)
+    Enum.each(entries, fn entry -> :ets.insert(@cache, {entry.uid, entry.dashboard}) end)
     {:ok, %{entries: entries}}
   end
 
@@ -258,7 +258,7 @@ defmodule GrafExTerm.Dashboard.Store do
          {:ok, dashboard} <- Parser.parse(raw) do
       entry = %{uid: dashboard.uid, uri: uri, dashboard: dashboard, datasource_map: %{}}
       new_entries = Enum.reject(state.entries, fn e -> e.uid == dashboard.uid end) ++ [entry]
-      Cachex.put(@cache, dashboard.uid, dashboard)
+      :ets.insert(@cache, {dashboard.uid, dashboard})
       persist(new_entries)
       datasource_vars = Parser.datasource_vars(dashboard)
 
@@ -272,7 +272,7 @@ defmodule GrafExTerm.Dashboard.Store do
 
   def handle_call({:remove, uid}, _from, state) do
     new_entries = Enum.reject(state.entries, fn e -> e.uid == uid end)
-    Cachex.del(@cache, uid)
+    :ets.delete(@cache, uid)
     persist(new_entries)
     {:reply, :ok, %{state | entries: new_entries}}
   end
@@ -318,7 +318,10 @@ defmodule GrafExTerm.Dashboard.Store do
   end
 
   defp store_path do
-    base = System.get_env("XDG_CONFIG_HOME") || Path.join(System.user_home!(), ".config")
+    base =
+      Application.get_env(:graf_ex_term, :store_dir) || System.get_env("XDG_CONFIG_HOME") ||
+        Path.join(System.user_home!(), ".config")
+
     dir = Path.join(base, "graf_ex_term")
     File.mkdir_p!(dir)
     Path.join(dir, "dashboards.json")

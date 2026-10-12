@@ -8,8 +8,9 @@ defmodule GrafExTerm.Panel.Timeseries do
   prepared result into a widget. Calling `render/3` on raw `{:ok, series}`
   prepares it first, so the split is an optimisation the caller may skip.
 
-  Series are drawn back to front by average magnitude, smallest first, so
-  larger areas do not hide smaller ones. A series carrying a `:weight` above 1
+  Series are stacked when the panel's `custom.stacking.mode` is `"normal"`,
+  smallest average magnitude at the bottom; otherwise each is drawn from the
+  baseline, largest first, so larger areas do not hide smaller ones. A series carrying a `:weight` above 1
   — the marker `GrafExTerm.Refresh.SeriesClusterer` puts on a merged cluster —
   is drawn with an opacity proportional to how many series it stands for.
 
@@ -18,6 +19,11 @@ defmodule GrafExTerm.Panel.Timeseries do
   units are divided down to the largest SI step the peak reaches and labelled
   with the matching per-second suffix. Explicit `min`/`max` from the panel's
   `fieldConfig` are applied for every unit except `percentunit`.
+
+  Each sample time becomes an x label, local `HH:MM:SS`, which the chart's value
+  readout shows for the column under the pointer. The `:chart_renderer`
+  application environment value, when set, is passed to the chart as its
+  `:renderer` (see `Drafter.Widget.Chart`).
   """
 
   import Drafter.App, only: [chart: 2, placeholder: 1]
@@ -38,17 +44,19 @@ defmodule GrafExTerm.Panel.Timeseries do
   anything else is returned unchanged, so error tuples pass through to
   `render/3` and become a placeholder there.
 
-  Returns `{:prepared_ts, %{values: values, opts: opts}}`. The chart type is
-  `:bar` when the panel sets `drawStyle` to `"bars"` and `:braille_area`
-  otherwise.
+  Returns `{:prepared_ts, %{values: values, opts: opts}}`. When the panel sets
+  `drawStyle` to `"bars"`, one series is a `:bar` chart of plain numbers and
+  several are a `:clustered_bar` chart, or `:stacked_bar` when
+  `custom.stacking.mode` is `"normal"`; otherwise the chart is
+  `:braille_area`.
   """
   @spec prepare(map(), {:ok, list()} | any()) :: {:prepared_ts, map()} | any()
   def prepare(panel, {:ok, series}) do
     unit = get_in(panel.field_config, ["defaults", "unit"]) || ""
     {scaled_series, unit_axis_opts} = scale_for_unit(series, unit)
-    sorted = sort_largest_first(scaled_series)
-    values = extract_values(sorted)
-    type = chart_type(panel)
+    stacked? = stacked?(panel)
+    sorted = scaled_series |> sort_largest_first() |> draw_order(stacked?)
+    {type, values} = chart_data(panel, sorted)
 
     has_weights = Enum.any?(sorted, fn s -> Map.get(s, :weight, 1) > 1 end)
     num_series = length(sorted)
@@ -62,7 +70,7 @@ defmodule GrafExTerm.Panel.Timeseries do
             true -> 1.0
           end
 
-        [show_baseline: true, fill_opacity: fill, zero_center: :independent]
+        [show_baseline: true, fill_opacity: fill, zero_center: :linear, stacked: stacked?]
       else
         []
       end
@@ -70,7 +78,8 @@ defmodule GrafExTerm.Panel.Timeseries do
     opts =
       [chart_type: type] ++
         braille_opts ++
-        [show_axes: true, title: panel.title, colors: @palette] ++
+        [show_axes: true, colors: @palette, x_labels: time_labels(sorted)] ++
+        renderer_opts() ++
         base_axis_opts(panel, unit) ++
         unit_axis_opts
 
@@ -102,14 +111,49 @@ defmodule GrafExTerm.Panel.Timeseries do
     placeholder(label: "No data", height: height)
   end
 
-  defp chart_type(panel) do
-    draw_style = get_in(panel.field_config, ["defaults", "custom", "drawStyle"])
+  defp time_labels([]), do: []
 
-    case draw_style do
-      "bars" -> :bar
-      _ -> :braille_area
+  defp time_labels(series) do
+    series
+    |> Enum.max_by(&length(&1.values))
+    |> Map.fetch!(:values)
+    |> Enum.map(fn {ts, _} -> ts |> local_time() |> Time.to_string() end)
+  end
+
+  defp local_time(unix_seconds) do
+    {_date, time} = :calendar.system_time_to_local_time(unix_seconds, :second)
+    Time.from_erl!(time)
+  end
+
+  defp renderer_opts do
+    case Application.get_env(:graf_ex_term, :chart_renderer) do
+      nil -> []
+      renderer -> [renderer: renderer]
     end
   end
+
+  defp stacked?(panel) do
+    get_in(panel.field_config, ["defaults", "custom", "stacking", "mode"]) == "normal"
+  end
+
+  defp draw_order(series, true), do: series
+  defp draw_order(series, false), do: Enum.reverse(series)
+
+  defp chart_data(panel, series) do
+    custom = get_in(panel.field_config, ["defaults", "custom"]) || %{}
+
+    case Map.get(custom, "drawStyle") do
+      "bars" -> bar_data(Enum.map(series, &plain_values/1), get_in(custom, ["stacking", "mode"]))
+      _ -> {:braille_area, extract_values(series)}
+    end
+  end
+
+  defp bar_data([only], _stacking), do: {:bar, only}
+  defp bar_data([], _stacking), do: {:bar, []}
+  defp bar_data(series, "normal"), do: {:stacked_bar, series}
+  defp bar_data(series, _stacking), do: {:clustered_bar, series}
+
+  defp plain_values(series), do: Enum.map(series.values, &elem(&1, 1))
 
   defp base_axis_opts(panel, unit) do
     defaults = get_in(panel.field_config, ["defaults"]) || %{}

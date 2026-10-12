@@ -8,7 +8,9 @@ defmodule GrafExTerm.Variable.Manager do
   leaving stops it; calling into it for a dashboard that is not open exits.
 
   At start every `"query"` variable whose saved value is empty is resolved
-  against Prometheus. Only the `label_values(selector, label)` and
+  against Prometheus, or against `GrafExTerm.Datasource.Demo` when the
+  `"prometheus"` datasource config has `type: :demo`. Only the
+  `label_values(selector, label)` and
   `label_values(label)` forms are understood, and the first returned value is
   taken; any other query, or a failed lookup, leaves the variable empty.
   Variables resolve in declaration order and each sees the ones before it, so
@@ -21,6 +23,7 @@ defmodule GrafExTerm.Variable.Manager do
 
   use GenServer
 
+  alias GrafExTerm.Datasource.Demo
   alias GrafExTerm.Variable.Substitution
 
   require Logger
@@ -121,19 +124,28 @@ defmodule GrafExTerm.Variable.Manager do
   defp resolve_var(var, _acc, _datasources), do: var.current_value
 
   defp fetch_label_values(query, datasources) do
+    config = Map.get(datasources, "prometheus", %{url: "http://localhost:9090"})
+
     with {:ok, metric_selector, label_name} <- parse_label_values(query) do
-      config = Map.get(datasources, "prometheus", %{url: "http://localhost:9090"})
-      url = Map.fetch!(config, :url) <> "/api/v1/label/#{label_name}/values"
-      params = if metric_selector != "", do: ["match[]": metric_selector], else: []
+      label_values(config, metric_selector, label_name)
+    end
+  end
 
-      case Req.get(url, params: params) do
-        {:ok, %{body: %{"data" => values}}} when is_list(values) ->
-          {:ok, values}
+  defp label_values(%{type: :demo}, _metric_selector, label_name) do
+    {:ok, Demo.label_values(label_name)}
+  end
 
-        other ->
-          Logger.debug("Label values fetch failed url=#{url} result=#{inspect(other)}")
-          {:error, :failed}
-      end
+  defp label_values(config, metric_selector, label_name) do
+    url = Map.fetch!(config, :url) <> "/api/v1/label/#{label_name}/values"
+    params = if metric_selector != "", do: ["match[]": metric_selector], else: []
+
+    case Req.get(url, params: params) do
+      {:ok, %{body: %{"data" => values}}} when is_list(values) ->
+        {:ok, values}
+
+      other ->
+        Logger.debug("Label values fetch failed url=#{url} result=#{inspect(other)}")
+        {:error, :failed}
     end
   end
 

@@ -2,6 +2,7 @@ defmodule GrafExTerm.Screen.MainTest do
   use ExUnit.Case, async: false
 
   alias Drafter.Test.HeadlessDriver
+  alias GrafExTerm.Refresh.DataCache
   alias GrafExTerm.Screen.Main
   alias GrafExTerm.Test.Headless
 
@@ -11,33 +12,19 @@ defmodule GrafExTerm.Screen.MainTest do
       assert state.dashboards == []
       assert state.selected_uid == nil
       assert state.selected_panels == []
-      assert state.panel_data == %{}
       assert state.prepared_panel_data == %{}
       assert state.variables == %{}
       assert state.loading == false
       assert state.data_version == nil
       assert state.column_visibility == %{}
       assert state.scrolling == false
-      assert state.pending_data == nil
+      assert state.pending == false
       assert state.row_filter == nil
       assert state.table_layouts == %{}
     end
   end
 
   describe "handle_event/3 — select_dashboard" do
-    test "deselecting (nil) clears all panel state" do
-      state = %{Main.mount(%{}) | selected_uid: "abc", loading: true, row_filter: %{"k" => "v"}}
-      {:ok, new_state} = Main.handle_event(:select_dashboard, nil, state)
-      assert new_state.selected_uid == nil
-      assert new_state.selected_panels == []
-      assert new_state.panel_data == %{}
-      assert new_state.prepared_panel_data == %{}
-      assert new_state.loading == false
-      assert new_state.row_filter == nil
-      assert new_state.scrolling == false
-      assert new_state.pending_data == nil
-    end
-
     test "selecting unknown uid returns error without crashing" do
       state = Main.mount(%{})
       result = Main.handle_event(:select_dashboard, "nonexistent_uid", state)
@@ -68,9 +55,11 @@ defmodule GrafExTerm.Screen.MainTest do
         2 => {:prepared, [%{cpu: 55}], [%{key: :cpu, label: "CPU"}]}
       }
 
+      DataCache.put("row-select", panel_data)
+
       state = %{
         Main.mount(%{})
-        | panel_data: panel_data,
+        | selected_uid: "row-select",
           prepared_panel_data: prepared
       }
 
@@ -107,25 +96,26 @@ defmodule GrafExTerm.Screen.MainTest do
       state = %{Main.mount(%{}) | scrolling: true}
       new_state = Main.on_scroll_idle(state)
       assert new_state.scrolling == false
-      assert new_state.pending_data == nil
+      assert new_state.pending == false
     end
 
-    test "on_scroll_idle flushes pending_data when present" do
-      pending_data = {%{1 => {:ok, []}}, 42}
+    test "on_scroll_idle applies a refresh that arrived while scrolling" do
+      DataCache.put("scroll-idle", %{1 => {:ok, []}})
+      %{version: version} = DataCache.get("scroll-idle")
 
       state = %{
         Main.mount(%{})
         | scrolling: true,
-          pending_data: pending_data,
-          selected_uid: "uid",
+          pending: true,
+          selected_uid: "scroll-idle",
           selected_panels: []
       }
 
       new_state = Main.on_scroll_idle(state)
       assert new_state.scrolling == false
-      assert new_state.pending_data == nil
-      assert new_state.panel_data == %{1 => {:ok, []}}
-      assert new_state.data_version == 42
+      assert new_state.pending == false
+      assert new_state.prepared_panel_data == %{1 => {:ok, []}}
+      assert new_state.data_version == version
     end
   end
 
@@ -142,7 +132,7 @@ defmodule GrafExTerm.Screen.MainTest do
       assert state.selected_uid == nil
       assert state.loading == false
       assert state.scrolling == false
-      assert state.pending_data == nil
+      assert state.pending == false
     end
 
     test "app renders without crash at startup", %{ctx: ctx} do

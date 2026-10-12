@@ -98,6 +98,10 @@ defmodule GrafExTerm.Dashboard.Types do
         this field is not needed to reach them.
       * `:organize` — `nil`, or `%{exclude: map, rename: map, index: map}`
         from an `organize` transformation, applied to table columns.
+      * `:max_data_points` — Grafana `maxDataPoints`, a positive integer capping
+        how many samples a range query returns, or `nil` when unset.
+      * `:min_interval` — Grafana panel `interval` such as `"30s"` or `">1m"`,
+        the smallest query step allowed, or `nil` when unset.
 
     A `"row"` panel is a section header rather than a visualisation: the
     panels that follow it, up to the next row, belong to it.
@@ -111,7 +115,9 @@ defmodule GrafExTerm.Dashboard.Types do
       :field_config,
       :options,
       :panels,
-      :organize
+      :organize,
+      :max_data_points,
+      :min_interval
     ]
 
     @type grid_pos :: %{
@@ -132,7 +138,9 @@ defmodule GrafExTerm.Dashboard.Types do
             field_config: map(),
             options: map(),
             panels: [map()],
-            organize: organize() | nil
+            organize: organize() | nil,
+            max_data_points: pos_integer() | nil,
+            min_interval: String.t() | nil
           }
   end
 

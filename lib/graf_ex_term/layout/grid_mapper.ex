@@ -137,13 +137,12 @@ defmodule GrafExTerm.Layout.GridMapper do
       not (view.all_tables_collapsed or MapSet.member?(view.collapsed_table_panels, panel.id))
 
     widget =
-      Renderer.render(
-        panel,
-        data,
-        view.column_visibility,
-        view.table_layouts,
-        table_expanded,
-        view.column_filter
+      Renderer.render(panel, data,
+        height: panel.grid_pos.h * view.height_ratio,
+        column_visibility: view.column_visibility,
+        table_layouts: view.table_layouts,
+        table_expanded: table_expanded,
+        column_filter: view.column_filter
       )
 
     vertical([widget], colspan: panel.grid_pos.w)

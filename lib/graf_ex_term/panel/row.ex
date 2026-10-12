@@ -17,9 +17,9 @@ defmodule GrafExTerm.Panel.Row do
   the widget id `:"row_<id>"`. `collapsed` is the row's current state, and the
   widget is drawn expanded when it is `false`.
 
-  `panel_count` is how many panels the row contains; when the row is collapsed
-  and the count is above zero the title gains a `(N panels)` suffix. Defaults
-  to `0`, which suppresses the suffix.
+  The header is drawn as the title followed by a line across the row, with the
+  panel count at its right end. `panel_count` is how many panels the row
+  contains; `0`, the default, shows no count.
 
   `children` are the already-built widgets for those panels, and
   `content_height` is their combined height in terminal rows. Both default to
@@ -38,17 +38,12 @@ defmodule GrafExTerm.Panel.Row do
           non_neg_integer()
         ) :: tuple()
   def render(panel, collapsed, panel_count \\ 0, children \\ [], content_height \\ 0) do
-    title =
-      if collapsed and panel_count > 0 do
-        "#{panel.title}  (#{panel_count} panels)"
-      else
-        panel.title
-      end
-
     collapsible(
-      title,
+      panel.title,
       children,
       id: :"row_#{panel.id}",
+      rule: true,
+      summary: panel_summary(panel_count),
       content_height: content_height,
       expanded: not collapsed,
       on_toggle: fn expanded ->
@@ -56,4 +51,8 @@ defmodule GrafExTerm.Panel.Row do
       end
     )
   end
+
+  defp panel_summary(0), do: nil
+  defp panel_summary(1), do: "1 panel"
+  defp panel_summary(count), do: "#{count} panels"
 end

@@ -8,9 +8,12 @@ defmodule GrafExTerm.Screen.Viewer do
   `Esc` or unmount, stops both.
 
   Data is polled from `GrafExTerm.Refresh.DataCache` every 500 ms rather than
-  driven by PubSub, and only rebuilt when the cache version changes. Table
-  panels are prepared on arrival; other panel types are rendered from raw
-  cache data.
+  driven by PubSub, and only rebuilt when the cache version changes. Data is
+  prepared on arrival with `GrafExTerm.Panel.Prepare`; only the prepared form
+  is held in screen state.
+
+  The scheduler is told the terminal width at start and on every resize, so
+  it can size each panel's query step.
 
   Props: `%{dashboard: dashboard}`, a parsed
   `GrafExTerm.Dashboard.Types.Dashboard`.
@@ -24,7 +27,7 @@ defmodule GrafExTerm.Screen.Viewer do
   use Drafter.App
 
   alias GrafExTerm.Layout.GridMapper
-  alias GrafExTerm.Panel.Table
+  alias GrafExTerm.Panel.Prepare
   alias GrafExTerm.Refresh.{DataCache, Scheduler}
   alias GrafExTerm.Variable.Manager
 
@@ -34,14 +37,15 @@ defmodule GrafExTerm.Screen.Viewer do
       {Manager, dashboard}
     )
 
+    {width, _height} = Drafter.Compositor.get_screen_size()
+
     DynamicSupervisor.start_child(
       GrafExTerm.RefreshSupervisor,
-      {Scheduler, dashboard}
+      {Scheduler, {dashboard, columns: pane_columns(width)}}
     )
 
     %{
       dashboard: dashboard,
-      panel_data: %{},
       prepared_panel_data: %{},
       variables: initial_variables(dashboard),
       loading: true,
@@ -66,14 +70,12 @@ defmodule GrafExTerm.Screen.Viewer do
         state
 
       {:updated, %{panel_data: panel_data, version: version}} ->
-        vars = fetch_vars(uid)
-        prepared = prepare_panel_data(panel_data, state.dashboard.panels)
+        prepared = Prepare.all(panel_data, state.dashboard.panels, nil, state.collapsed_rows)
 
         %{
           state
-          | panel_data: panel_data,
-            prepared_panel_data: prepared,
-            variables: vars,
+          | prepared_panel_data: prepared,
+            variables: fetch_vars(uid),
             loading: false,
             data_version: version
         }
@@ -151,7 +153,10 @@ defmodule GrafExTerm.Screen.Viewer do
   def handle_event(event, _data, state) when is_tuple(event), do: handle_event(event, state)
   def handle_event(_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, ?r}, state), do: handle_event({:key, :r}, state)
+  def handle_event({:resize, {width, _height}}, state) do
+    Scheduler.set_columns(state.dashboard.uid, pane_columns(width))
+    {:noreply, state}
+  end
 
   def handle_event({:key, :r}, state) do
     Scheduler.refresh_now(state.dashboard.uid)
@@ -168,7 +173,6 @@ defmodule GrafExTerm.Screen.Viewer do
     {:pop, nil}
   end
 
-  def handle_event({:key, ?q}, _state), do: {:stop, :normal}
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event({:key, :q, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}
@@ -197,21 +201,7 @@ defmodule GrafExTerm.Screen.Viewer do
     end
   end
 
-  defp prepare_panel_data(panel_data, panels) do
-    table_ids =
-      panels
-      |> Enum.filter(fn p -> p.type in ["table"] end)
-      |> MapSet.new(fn p -> p.id end)
-
-    Map.new(panel_data, fn {panel_id, data} ->
-      if MapSet.member?(table_ids, panel_id) do
-        {rows, cols} = Table.prepare(data)
-        {panel_id, {:prepared, rows, cols}}
-      else
-        {panel_id, data}
-      end
-    end)
-  end
+  defp pane_columns(width), do: max(1, width - 1)
 
   defp fetch_vars(dashboard_uid) do
     Manager.get_values(dashboard_uid)

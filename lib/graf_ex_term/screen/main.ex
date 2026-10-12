@@ -10,20 +10,25 @@ defmodule GrafExTerm.Screen.Main do
 
   Refresh announcements only schedule a poll of
   `GrafExTerm.Refresh.DataCache`; the cache's version decides whether anything
-  is rebuilt. Data arriving while the user is scrolling is parked in
-  `:pending_data` and applied when scrolling stops, so a refresh never
-  reflows the view under the user's cursor.
+  is rebuilt. A refresh announced while the user is scrolling sets `:pending`
+  and is applied when scrolling stops, so a refresh never reflows the view
+  under the user's cursor.
 
-  Fetched data is prepared once per arrival rather than per frame: table
-  panels become `{:prepared, rows, columns}` and timeseries panels
-  `{:prepared_ts, map}`, and rendering consumes those.
+  Fetched data is prepared once per arrival with `GrafExTerm.Panel.Prepare`,
+  and only the prepared form is held in screen state; the raw data stays in
+  the cache.
+
+  The scheduler is told how many terminal columns the dashboard pane has, at
+  start and on every resize, so it can size each panel's query step.
 
   Selecting rows in a table filters every timeseries panel on the dashboard to
   the series whose labels match the selected rows; selecting none clears the
   filter.
 
-  Key bindings: `a` adds a dashboard, `f` toggles the per-column table
-  selector, `r` refreshes the selected dashboard, `q` quits.
+  The top line is a `GrafExTerm.Screen.StatusBar`. Key bindings: `a` adds a
+  dashboard, `f` toggles the per-column table selector, `b` hides or shows the
+  dashboard list, `r` refreshes the selected dashboard, `q` quits. Clicking a
+  footer hint does the same as its key.
 
   Per-dashboard settings — visible columns, table layouts, collapsed rows and
   the column filter — are read from and written back to
@@ -36,8 +41,9 @@ defmodule GrafExTerm.Screen.Main do
 
   alias GrafExTerm.Dashboard.Store
   alias GrafExTerm.Layout.GridMapper
-  alias GrafExTerm.Panel.{Table, Timeseries}
+  alias GrafExTerm.Panel.Prepare
   alias GrafExTerm.Refresh.{DataCache, Scheduler}
+  alias GrafExTerm.Screen.StatusBar
   alias GrafExTerm.Variable.Manager
 
   def mount(_props) do
@@ -45,7 +51,6 @@ defmodule GrafExTerm.Screen.Main do
       dashboards: [],
       selected_uid: nil,
       selected_panels: [],
-      panel_data: %{},
       prepared_panel_data: %{},
       variables: %{},
       loading: false,
@@ -56,9 +61,17 @@ defmodule GrafExTerm.Screen.Main do
       table_layouts: %{},
       column_filter: false,
       scrolling: false,
-      pending_data: nil
+      pending: false,
+      columns: nil,
+      width: nil,
+      sidebar: true,
+      dashboard_title: nil,
+      dashboard_refresh: nil,
+      updated_at: nil
     }
   end
+
+  @sidebar_width 28
 
   def refresh_rate, do: :unlimited
 
@@ -66,10 +79,11 @@ defmodule GrafExTerm.Screen.Main do
     theme = Application.get_env(:graf_ex_term, :theme, "tokyo-night")
     Drafter.ThemeManager.set_theme(theme)
     Drafter.set_interval(1000, :clock_tick)
-    %{state | dashboards: Store.list()}
+    {width, _height} = Drafter.Compositor.get_screen_size()
+    %{state | dashboards: Store.list(), width: width, columns: pane_columns(width, true)}
   end
 
-  def on_message({:data_refreshed, uid, _}, %{selected_uid: uid} = state) do
+  def on_message({:data_refreshed, uid}, %{selected_uid: uid} = state) do
     send(self(), {:timer, :data_ready})
     state
   end
@@ -78,71 +92,40 @@ defmodule GrafExTerm.Screen.Main do
 
   def on_timer(:data_ready, %{selected_uid: nil} = state), do: state
 
-  def on_timer(:data_ready, %{scrolling: true} = state) do
-    case DataCache.take_if_updated(state.selected_uid, state.data_version) do
-      :unchanged ->
-        state
-
-      {:updated, %{panel_data: panel_data, version: version}} ->
-        %{state | pending_data: {panel_data, version}}
-    end
-  end
-
-  def on_timer(:data_ready, state) do
-    case DataCache.take_if_updated(state.selected_uid, state.data_version) do
-      :unchanged ->
-        state
-
-      {:updated, %{panel_data: panel_data, version: version}} ->
-        vars = fetch_vars(state.selected_uid)
-
-        prepared =
-          prepare_panel_data(
-            panel_data,
-            state.selected_panels,
-            state.row_filter,
-            state.collapsed_rows
-          )
-
-        %{
-          state
-          | panel_data: panel_data,
-            prepared_panel_data: prepared,
-            variables: vars,
-            loading: false,
-            data_version: version
-        }
-    end
-  end
+  def on_timer(:data_ready, %{scrolling: true} = state), do: %{state | pending: true}
+  def on_timer(:data_ready, state), do: apply_cached_data(state)
 
   def on_timer(:clock_tick, state), do: state
   def on_timer(_timer_id, state), do: state
 
   def on_scroll_active(state), do: %{state | scrolling: true}
 
-  def on_scroll_idle(%{pending_data: nil} = state), do: %{state | scrolling: false}
+  def on_scroll_idle(%{pending: false} = state), do: %{state | scrolling: false}
 
-  def on_scroll_idle(%{pending_data: {panel_data, version}} = state) do
-    vars = fetch_vars(state.selected_uid)
+  def on_scroll_idle(state) do
+    apply_cached_data(%{state | scrolling: false, pending: false})
+  end
 
-    prepared =
-      prepare_panel_data(
-        panel_data,
-        state.selected_panels,
-        state.row_filter,
-        state.collapsed_rows
-      )
+  defp apply_cached_data(%{selected_uid: nil} = state), do: state
 
-    %{
-      state
-      | scrolling: false,
-        pending_data: nil,
-        panel_data: panel_data,
-        prepared_panel_data: prepared,
-        variables: vars,
-        loading: false,
-        data_version: version
-    }
+  defp apply_cached_data(state) do
+    case DataCache.take_if_updated(state.selected_uid, state.data_version) do
+      :unchanged ->
+        state
+
+      {:updated, %{panel_data: panel_data, version: version}} ->
+        prepared =
+          Prepare.all(panel_data, state.selected_panels, state.row_filter, state.collapsed_rows)
+
+        %{
+          state
+          | prepared_panel_data: prepared,
+            variables: fetch_vars(state.selected_uid),
+            loading: false,
+            data_version: version,
+            updated_at: local_time()
+        }
+    end
   end
 
   defp unsubscribe(nil), do: :ok
@@ -150,53 +133,29 @@ defmodule GrafExTerm.Screen.Main do
 
   def render(state) do
     vertical([
-      header("GrafExTerm"),
+      StatusBar.render(%{
+        title: state.dashboard_title,
+        range_seconds: Application.get_env(:graf_ex_term, :time_range_seconds, 3600),
+        refresh: state.dashboard_refresh,
+        loading: state.loading,
+        updated_at: state.updated_at
+      }),
       horizontal(
-        [
-          vertical(left_panel_items(state), width: 32),
-          scrollable(right_panel_items(state), flex: 1, click_to_scroll: true)
-        ],
-        flex: 1
-      ),
-      horizontal(
-        [
-          button("+Add", on_click: :add_dashboard, variant: :primary),
-          checkbox("Filter",
-            id: :column_filter,
-            checked: state.column_filter,
-            on_change: :toggle_column_filter
-          )
-        ],
-        gap: 2
+        sidebar(state) ++
+          [scrollable(right_panel_items(state), flex: 1, click_to_scroll: true, scrollbar: :thin)],
+        flex: 1,
+        gap: 1
       ),
       footer(
         bindings: [
           {"a", "add"},
           {"f", "filter"},
+          {"b", "sidebar"},
           {"r", "refresh"},
           {"q", "quit"}
         ]
       )
     ])
-  end
-
-  def handle_event(:select_dashboard, nil, state) do
-    stop_active_children(state.selected_uid)
-    unsubscribe(state.selected_uid)
-
-    {:ok,
-     %{
-       state
-       | selected_uid: nil,
-         selected_panels: [],
-         panel_data: %{},
-         prepared_panel_data: %{},
-         loading: false,
-         row_filter: nil,
-         table_layouts: %{},
-         scrolling: false,
-         pending_data: nil
-     }}
   end
 
   def handle_event(:select_dashboard, uid, state) do
@@ -205,14 +164,16 @@ defmodule GrafExTerm.Screen.Main do
         stop_active_children(state.selected_uid)
         unsubscribe(state.selected_uid)
         Phoenix.PubSub.subscribe(GrafExTerm.PubSub, "dashboard:#{uid}")
-        start_children(dashboard)
+        start_children(dashboard, state.columns)
 
         {:ok,
          %{
            state
            | selected_uid: uid,
              selected_panels: dashboard.panels,
-             panel_data: %{},
+             dashboard_title: dashboard.title,
+             dashboard_refresh: dashboard.refresh,
+             updated_at: nil,
              prepared_panel_data: %{},
              variables: initial_variables(dashboard),
              column_visibility: Store.get_column_visibility(uid),
@@ -223,7 +184,7 @@ defmodule GrafExTerm.Screen.Main do
              data_version: nil,
              row_filter: nil,
              scrolling: false,
-             pending_data: nil
+             pending: false
          }}
 
       {:error, _} ->
@@ -231,18 +192,8 @@ defmodule GrafExTerm.Screen.Main do
     end
   end
 
-  def handle_event(:add_dashboard, _data, _state) do
-    {:show_modal, GrafExTerm.Screen.AddDashboardModal, %{},
-     [title: "Add Dashboard", width: 60, height: 16]}
-  end
-
   def handle_event(:refresh_dashboards, _data, state) do
     {:ok, %{state | dashboards: Store.list()}}
-  end
-
-  def handle_event(:toggle_column_filter, checked, state) do
-    if state.selected_uid, do: Store.save_column_filter(state.selected_uid, checked)
-    {:ok, %{state | column_filter: checked}}
   end
 
   def handle_event({:toggle_column, panel_id, col_key}, checked, state) do
@@ -260,19 +211,11 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   def handle_event({:table_row_selected, _panel_id}, [], state) do
-    prepared =
-      refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, nil)
-
-    {:noreply, %{state | prepared_panel_data: prepared, row_filter: nil}}
+    {:noreply, refilter(state, nil)}
   end
 
   def handle_event({:table_row_selected, _panel_id}, rows, state) do
-    filter = extract_label_filter(rows)
-
-    prepared =
-      refilter_series(state.prepared_panel_data, state.panel_data, state.selected_panels, filter)
-
-    {:noreply, %{state | prepared_panel_data: prepared, row_filter: filter}}
+    {:noreply, refilter(state, extract_label_filter(rows))}
   end
 
   def handle_event({:toggle_row, row_id}, collapsed, state) do
@@ -306,6 +249,11 @@ defmodule GrafExTerm.Screen.Main do
     {:ok, %{state | column_filter: new_filter}}
   end
 
+  def handle_event({:key, :b}, state) do
+    sidebar = not state.sidebar
+    {:ok, resize_pane(%{state | sidebar: sidebar}, state.width)}
+  end
+
   def handle_event({:key, :r}, %{selected_uid: nil} = state), do: {:noreply, state}
 
   def handle_event({:key, :r}, state) do
@@ -314,6 +262,9 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
+
+  def handle_event({:resize, {width, _height}}, state), do: {:ok, resize_pane(state, width)}
+
   def handle_event(_event, state), do: {:noreply, state}
 
   def unmount(state) do
@@ -321,16 +272,21 @@ defmodule GrafExTerm.Screen.Main do
     :ok
   end
 
-  defp left_panel_items(state) do
-    items = [{"— none —", nil} | Enum.map(state.dashboards, fn d -> {d.title, d.uid} end)]
+  defp sidebar(%{sidebar: false}), do: []
 
+  defp sidebar(state) do
     [
-      label("Dashboards", class: :primary, style: %{bold: true}),
-      radio_set(items,
-        id: :dashboard_selector,
-        selected: state.selected_uid,
-        on_change: :select_dashboard,
-        height: length(items)
+      vertical(
+        [
+          label(" Dashboards", class: :muted),
+          option_list(Enum.map(state.dashboards, &{&1.title, &1.uid}),
+            id: :dashboard_selector,
+            selected: state.selected_uid,
+            on_select: :select_dashboard,
+            flex: 1
+          )
+        ],
+        width: @sidebar_width
       )
     ]
   end
@@ -344,23 +300,36 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   defp right_panel_items(state) do
-    case Store.get_dashboard(state.selected_uid) do
-      {:ok, dashboard} ->
-        GridMapper.to_tui_layout(dashboard.panels, state.prepared_panel_data,
-          column_visibility: state.column_visibility,
-          collapsed_rows: state.collapsed_rows,
-          table_layouts: state.table_layouts,
-          column_filter: state.column_filter
-        )
-
-      {:error, _} ->
-        [label("Dashboard unavailable", class: :error)]
-    end
+    GridMapper.to_tui_layout(state.selected_panels, state.prepared_panel_data,
+      column_visibility: state.column_visibility,
+      collapsed_rows: state.collapsed_rows,
+      table_layouts: state.table_layouts,
+      column_filter: state.column_filter
+    )
   end
 
-  defp start_children(dashboard) do
+  defp pane_columns(width, true), do: max(1, width - @sidebar_width - 2)
+  defp pane_columns(width, false), do: max(1, width - 1)
+
+  defp resize_pane(state, nil), do: state
+
+  defp resize_pane(state, width) do
+    columns = pane_columns(width, state.sidebar)
+    if state.selected_uid, do: Scheduler.set_columns(state.selected_uid, columns)
+    %{state | width: width, columns: columns}
+  end
+
+  defp local_time do
+    NaiveDateTime.local_now() |> NaiveDateTime.to_time() |> Time.truncate(:second)
+  end
+
+  defp start_children(dashboard, columns) do
     DynamicSupervisor.start_child(GrafExTerm.VarSupervisor, {Manager, dashboard})
-    DynamicSupervisor.start_child(GrafExTerm.RefreshSupervisor, {Scheduler, dashboard})
+
+    DynamicSupervisor.start_child(
+      GrafExTerm.RefreshSupervisor,
+      {Scheduler, {dashboard, columns: columns}}
+    )
   end
 
   defp stop_active_children(nil), do: :ok
@@ -408,80 +377,17 @@ defmodule GrafExTerm.Screen.Main do
     end
   end
 
-  defp prepare_panel_data(panel_data, panels, row_filter, collapsed_rows) do
-    panel_map = Map.new(panels, fn p -> {p.id, p} end)
-    active_ids = active_panel_ids(panels, collapsed_rows)
-
-    Map.new(panel_data, fn {panel_id, data} ->
-      if MapSet.member?(active_ids, panel_id) do
-        panel = Map.get(panel_map, panel_id)
-        {panel_id, prepare_single_panel(panel, data, row_filter)}
-      else
-        {panel_id, data}
+  defp refilter(state, filter) do
+    panel_data =
+      case DataCache.get(state.selected_uid) do
+        %{panel_data: panel_data} -> panel_data
+        nil -> %{}
       end
-    end)
-  end
 
-  defp prepare_single_panel(%{type: "table"} = panel, data, _row_filter) do
-    {rows, cols} = Table.prepare(data, panel.organize, panel.field_config)
-    {:prepared, rows, cols}
-  end
+    prepared =
+      Prepare.refilter(state.prepared_panel_data, panel_data, state.selected_panels, filter)
 
-  defp prepare_single_panel(%{type: type} = panel, data, row_filter)
-       when type in ["timeseries", "graph"] do
-    filtered = apply_row_filter(data, row_filter)
-    Timeseries.prepare(panel, filtered)
-  end
-
-  defp prepare_single_panel(_panel, data, row_filter) do
-    apply_row_filter(data, row_filter)
-  end
-
-  defp active_panel_ids(panels, collapsed_rows) do
-    panels
-    |> Enum.sort_by(fn p -> {p.grid_pos.y, p.grid_pos.x} end)
-    |> Enum.reduce({MapSet.new(), false}, &classify_panel(&1, &2, collapsed_rows))
-    |> elem(0)
-  end
-
-  defp classify_panel(%{type: "row"} = panel, {acc, _}, collapsed_rows) do
-    {acc, MapSet.member?(collapsed_rows, panel.id)}
-  end
-
-  defp classify_panel(_panel, {acc, true}, _collapsed_rows), do: {acc, true}
-
-  defp classify_panel(panel, {acc, false}, _collapsed_rows),
-    do: {MapSet.put(acc, panel.id), false}
-
-  defp refilter_series(prepared, raw_panel_data, panels, filter) do
-    panel_map = Map.new(panels, fn p -> {p.id, p} end)
-
-    Map.new(prepared, fn {panel_id, value} ->
-      case value do
-        {:prepared, _, _} ->
-          {panel_id, value}
-
-        _ ->
-          raw = Map.get(raw_panel_data, panel_id, {:error, :no_data})
-          panel = Map.get(panel_map, panel_id)
-          {panel_id, prepare_single_panel(panel, raw, filter)}
-      end
-    end)
-  end
-
-  defp apply_row_filter(data, nil), do: data
-
-  defp apply_row_filter({:ok, series}, filters) do
-    filtered = Enum.filter(series, &series_matches_any_filter?(&1, filters))
-    {:ok, filtered}
-  end
-
-  defp apply_row_filter(data, _filters), do: data
-
-  defp series_matches_any_filter?(series_entry, filters) do
-    Enum.any?(filters, fn filter ->
-      Enum.all?(filter, fn {key, val} -> Map.get(series_entry.labels, key) == val end)
-    end)
+    %{state | prepared_panel_data: prepared, row_filter: filter}
   end
 
   defp extract_label_filter(rows) do

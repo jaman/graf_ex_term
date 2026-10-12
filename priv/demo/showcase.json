@@ -1,0 +1,282 @@
+{
+  "uid": "graf-ex-term-showcase",
+  "title": "GrafExTerm Showcase",
+  "description": "Every panel type GrafExTerm draws, fed by the demo datasource.",
+  "refresh": "5s",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "GrafExTerm showcase",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 2 },
+      "options": {
+        "content": "Generated data, no Prometheus needed. Click a chart for its value readout (Esc hides it), resize the terminal to change query resolution, expand the rows at the bottom."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Services",
+      "gridPos": { "x": 0, "y": 2, "w": 8, "h": 3 },
+      "targets": [{ "refId": "A", "expr": "demo_up", "legendFormat": "{{service}}" }],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "Down", "color": "red" },
+                "1": { "text": "Up", "color": "green" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Requests / s",
+      "gridPos": { "x": 8, "y": 2, "w": 4, "h": 3 },
+      "options": { "graphMode": "area" },
+      "targets": [{ "refId": "A", "expr": "demo_http_requests{status=\"200\"}" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "blue" },
+              { "value": 220, "color": "orange" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "CPU web-1",
+      "gridPos": { "x": 12, "y": 2, "w": 4, "h": 3 },
+      "options": { "graphMode": "area" },
+      "targets": [{ "refId": "A", "expr": "demo_cpu_usage{instance=\"web-1\"}" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.5, "color": "yellow" },
+              { "value": 0.7, "color": "red" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Memory web-2",
+      "gridPos": { "x": 16, "y": 2, "w": 4, "h": 3 },
+      "targets": [{ "refId": "A", "expr": "demo_memory_bytes{instance=\"web-2\"}" }],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "CPU temperature",
+      "gridPos": { "x": 20, "y": 2, "w": 4, "h": 3 },
+      "targets": [{ "refId": "A", "expr": "demo_temperature" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 65, "color": "yellow" },
+              { "value": 80, "color": "red" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "HTTP requests by status",
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 5 },
+      "targets": [{ "refId": "A", "expr": "sum by (status) (rate(demo_http_requests[$__rate_interval]))", "legendFormat": "{{status}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Network I/O (tx below zero)",
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 5 },
+      "targets": [{ "refId": "A", "expr": "rate(demo_network_bytes[$__rate_interval])", "legendFormat": "{{direction}}" }],
+      "fieldConfig": {
+        "defaults": { "unit": "Bps" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "tx" },
+            "properties": [{ "id": "custom.transform", "value": "negative-Y" }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "CPU by instance",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 5 },
+      "targets": [{ "refId": "A", "expr": "demo_cpu_usage{instance=~\"web-.*\"}", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "API errors / s (bars)",
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 5 },
+      "maxDataPoints": 24,
+      "targets": [{ "refId": "A", "expr": "demo_errors{service=\"api\"}" }],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars" } } }
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "Disk usage",
+      "gridPos": { "x": 0, "y": 15, "w": 6, "h": 5 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "refId": "A", "expr": "demo_disk_usage", "legendFormat": "{{mount}}" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 50, "color": "yellow" },
+              { "value": 65, "color": "red" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "piechart",
+      "title": "Requests by status (mean)",
+      "gridPos": { "x": 6, "y": 15, "w": 6, "h": 5 },
+      "options": {
+        "reduceOptions": { "calcs": ["mean"] },
+        "legend": { "displayMode": "list", "values": ["percent"] }
+      },
+      "targets": [{ "refId": "A", "expr": "demo_http_requests", "legendFormat": "{{status}}" }]
+    },
+    {
+      "id": 13,
+      "type": "heatmap",
+      "title": "Request latency",
+      "gridPos": { "x": 12, "y": 15, "w": 6, "h": 5 },
+      "targets": [{ "refId": "A", "expr": "sum by (le) (rate(demo_request_duration_bucket[$__rate_interval]))", "format": "heatmap", "legendFormat": "{{le}}" }]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Queue depth",
+      "gridPos": { "x": 18, "y": 15, "w": 6, "h": 5 },
+      "interval": "30s",
+      "targets": [{ "refId": "A", "expr": "demo_queue_depth" }]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Inventory",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Instances",
+      "gridPos": { "x": 0, "y": 21, "w": 14, "h": 6 },
+      "targets": [
+        { "refId": "A", "expr": "demo_cpu_usage", "instant": true, "format": "table", "legendFormat": "CPU" },
+        { "refId": "B", "expr": "demo_memory_bytes", "instant": true, "format": "table", "legendFormat": "Memory" }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "__name__": true, "job": true },
+            "renameByName": { "instance": "Instance" },
+            "indexByName": { "instance": 0, "CPU": 1, "Memory": 2 }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "CPU" },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "steps": [
+                    { "value": null, "color": "green" },
+                    { "value": 0.45, "color": "yellow" },
+                    { "value": 0.6, "color": "red" }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "type": "table",
+      "title": "Services",
+      "gridPos": { "x": 14, "y": 21, "w": 10, "h": 6 },
+      "targets": [{ "refId": "A", "expr": "demo_up", "instant": true, "format": "table" }],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "__name__": true }, "renameByName": { "Value": "Up" } } }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "Down", "color": "red" },
+                "1": { "text": "Up", "color": "green" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Logs",
+      "collapsed": false,
+      "gridPos": { "x": 0, "y": 27, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
+      "id": 31,
+      "type": "logs",
+      "title": "Application logs",
+      "gridPos": { "x": 0, "y": 28, "w": 24, "h": 6 },
+      "maxDataPoints": 200,
+      "options": { "showTime": true, "wrapLogMessage": false },
+      "targets": [{ "refId": "A", "expr": "{service=~\".+\"}" }]
+    }
+  ]
+}

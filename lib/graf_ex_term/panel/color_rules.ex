@@ -115,6 +115,21 @@ defmodule GrafExTerm.Panel.ColorRules do
     end)
   end
 
+  @doc """
+  Returns the default threshold steps of `field_config`, lowest first.
+
+  Each step is `{value, color}`: `value` is the number the step starts at, or
+  `nil` for the base step, which always comes first; `color` is `{r, g, b}`
+  or `nil` when the step's colour does not resolve. Returns `[]` when the
+  panel defines no thresholds.
+  """
+  @spec threshold_steps(map()) :: [{number() | nil, {byte(), byte(), byte()} | nil}]
+  def threshold_steps(field_config) do
+    field_config
+    |> get_in(["defaults", "thresholds"])
+    |> parse_thresholds()
+  end
+
   defp parse_value_mappings(mappings) when is_list(mappings) do
     Enum.flat_map(mappings, fn
       %{"type" => "value", "options" => options} when is_map(options) ->

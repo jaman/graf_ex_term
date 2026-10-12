@@ -1,25 +1,24 @@
 defmodule GrafExTerm.Refresh.DataCache do
   @moduledoc """
-  Singleton process holding the most recent query results for every dashboard,
-  downsampled for display.
+  Singleton process holding the most recent query results for every dashboard.
 
   `GrafExTerm.Refresh.Scheduler` writes here after each fetch and screens poll
   with `take_if_updated/2`, which lets a screen skip re-rendering when nothing
   has changed. Only the latest result per dashboard is kept; there is no
   history.
 
-  Stored data is not the raw query result. Each series is reduced to at most
-  200 points by min/max bucketing — the extremes of each bucket are kept in
-  timestamp order, so spikes survive downsampling — and the series set is then
-  passed through `GrafExTerm.Refresh.SeriesClusterer`. Consumers therefore see
-  fewer points and possibly fewer series than the datasource returned, and
-  series may carry a `:weight`.
+  Stored data is not the raw query result: each panel's series set is passed
+  through `GrafExTerm.Refresh.SeriesClusterer`, so consumers may see fewer
+  series than the datasource returned, and series may carry a `:weight`.
+  Sample counts are already sized to the panel by the scheduler's query step.
 
   Versions are `System.monotonic_time/0` values, meaningful only for equality
   against a previously observed version.
   """
 
   use GenServer
+
+  alias GrafExTerm.Refresh.SeriesClusterer
 
   def start_link(_opts \\ []) do
     GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
@@ -30,7 +29,7 @@ defmodule GrafExTerm.Refresh.DataCache do
 
   `panel_data` maps panel id to that panel's result: `{:ok, series}`,
   `{:table, columns, rows}`, or an `{:error, reason}`. Only `{:ok, series}`
-  entries are downsampled and clustered; everything else is stored as given.
+  entries are clustered; everything else is stored as given.
 
   Asynchronous — returns before the data is stored.
   """
@@ -73,45 +72,15 @@ defmodule GrafExTerm.Refresh.DataCache do
     {:ok, state}
   end
 
-  @max_points_per_series 200
-
   @impl GenServer
   def handle_cast({:put, uid, panel_data}, state) do
-    version = System.monotonic_time()
-
-    downsampled =
-      Map.new(panel_data, fn {panel_id, data} -> {panel_id, downsample_panel(data)} end)
-
-    entry = %{panel_data: downsampled, version: version}
+    clustered = Map.new(panel_data, fn {panel_id, data} -> {panel_id, cluster_panel(data)} end)
+    entry = %{panel_data: clustered, version: System.monotonic_time()}
     {:noreply, Map.put(state, uid, entry)}
   end
 
-  alias GrafExTerm.Refresh.SeriesClusterer
-
-  defp downsample_panel({:ok, series}) do
-    downsampled = Enum.map(series, fn s -> %{s | values: downsample_values(s.values)} end)
-    clustered = SeriesClusterer.cluster(downsampled)
-    {:ok, clustered}
-  end
-
-  defp downsample_panel(other), do: other
-
-  defp downsample_values(values) when length(values) <= @max_points_per_series, do: values
-
-  defp downsample_values(values) do
-    n = length(values)
-    bucket_count = max(1, div(@max_points_per_series, 2))
-    bucket_size = n / bucket_count
-
-    for i <- 0..(bucket_count - 1) do
-      start_idx = round(i * bucket_size)
-      end_idx = round((i + 1) * bucket_size)
-      bucket = Enum.slice(values, start_idx, max(1, end_idx - start_idx))
-      {min_pt, max_pt} = Enum.min_max_by(bucket, fn {_ts, v} -> v end)
-      if elem(min_pt, 0) <= elem(max_pt, 0), do: [min_pt, max_pt], else: [max_pt, min_pt]
-    end
-    |> List.flatten()
-  end
+  defp cluster_panel({:ok, series}), do: {:ok, SeriesClusterer.cluster(series)}
+  defp cluster_panel(other), do: other
 
   @impl GenServer
   def handle_call({:get, uid}, _from, state) do

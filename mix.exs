@@ -31,11 +31,10 @@ defmodule GrafExTerm.MixProject do
 
   defp deps do
     [
-      family(:drafter, "~> 0.4.0", "../drafter"),
+      family(:drafter, "~> 0.5.4", "../drafter"),
       {:req, "~> 0.7"},
       {:jason, "~> 1.4"},
       {:phoenix_pubsub, "~> 2.1"},
-      {:cachex, "~> 3.6"},
       {:burrito, "~> 1.0", only: :prod, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}

@@ -58,22 +58,21 @@ defmodule GrafExTerm.Refresh.SeriesClusterer do
     end
   end
 
-  defp do_epsilon_group([], _epsilon), do: []
-
-  defp do_epsilon_group([first | rest], epsilon) do
-    {current_group, groups} =
-      Enum.reduce(rest, {[first], []}, fn {mean, _s} = item, {current, acc} ->
-        {prev_mean, _} = List.last(current)
-
-        if abs(mean - prev_mean) <= epsilon do
-          {current ++ [item], acc}
-        else
-          {[item], acc ++ [current]}
-        end
-      end)
-
-    groups ++ [current_group]
+  defp do_epsilon_group(sorted_scored, epsilon) do
+    Enum.chunk_while(sorted_scored, nil, &extend_group(&1, &2, epsilon), &close_group/1)
   end
+
+  defp extend_group({mean, _} = item, nil, _epsilon), do: {:cont, {mean, [item]}}
+
+  defp extend_group({mean, _} = item, {prev_mean, group}, epsilon)
+       when abs(mean - prev_mean) <= epsilon,
+       do: {:cont, {mean, [item | group]}}
+
+  defp extend_group({mean, _} = item, {_prev_mean, group}, _epsilon),
+    do: {:cont, Enum.reverse(group), {mean, [item]}}
+
+  defp close_group(nil), do: {:cont, nil}
+  defp close_group({_mean, group}), do: {:cont, Enum.reverse(group), nil}
 
   defp merge_smallest_gaps(groups, target_k) when length(groups) <= target_k, do: groups
 
@@ -157,14 +156,14 @@ defmodule GrafExTerm.Refresh.SeriesClusterer do
   defp median([]), do: 0.0
 
   defp median(vals) do
-    sorted = Enum.sort(vals)
-    n = length(sorted)
+    sorted = vals |> Enum.sort() |> List.to_tuple()
+    n = tuple_size(sorted)
     mid = div(n, 2)
 
     if rem(n, 2) == 0 do
-      (Enum.at(sorted, mid - 1) + Enum.at(sorted, mid)) / 2.0
+      (elem(sorted, mid - 1) + elem(sorted, mid)) / 2.0
     else
-      Enum.at(sorted, mid) * 1.0
+      elem(sorted, mid) * 1.0
     end
   end
 end

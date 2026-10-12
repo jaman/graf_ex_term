@@ -54,14 +54,11 @@ defmodule GrafExTerm.Screen.Browser do
   def handle_event(event, _data, state) when is_tuple(event), do: handle_event(event, state)
   def handle_event(_event, _data, state), do: {:noreply, state}
 
-  def handle_event({:key, ?r}, state), do: handle_event({:key, :r}, state)
-
   def handle_event({:key, :r}, state) do
     dashboards = GrafExTerm.Dashboard.Registry.list()
     {:ok, %{state | dashboards: dashboards}}
   end
 
-  def handle_event({:key, ?q}, _state), do: {:stop, :normal}
   def handle_event({:key, :q}, _state), do: {:stop, :normal}
   def handle_event({:key, :q, [:ctrl]}, _state), do: {:stop, :normal}
   def handle_event(_event, state), do: {:noreply, state}

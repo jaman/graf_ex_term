@@ -71,9 +71,17 @@ defmodule GrafExTerm.Dashboard.Parser do
       field_config: Map.get(raw, "fieldConfig", %{}),
       options: Map.get(raw, "options", %{}),
       panels: Map.get(raw, "panels", []),
-      organize: parse_organize(Map.get(raw, "transformations", []))
+      organize: parse_organize(Map.get(raw, "transformations", [])),
+      max_data_points: parse_max_data_points(Map.get(raw, "maxDataPoints")),
+      min_interval: parse_min_interval(Map.get(raw, "interval"))
     }
   end
+
+  defp parse_max_data_points(points) when is_integer(points) and points > 0, do: points
+  defp parse_max_data_points(_points), do: nil
+
+  defp parse_min_interval(interval) when is_binary(interval) and interval != "", do: interval
+  defp parse_min_interval(_interval), do: nil
 
   defp parse_grid_pos(gp) do
     %{
