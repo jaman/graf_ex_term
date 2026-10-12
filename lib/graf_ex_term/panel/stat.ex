@@ -10,26 +10,29 @@ defmodule GrafExTerm.Panel.Stat do
   is decided by the mapped value, not the text, so a mapping of `1` to
   `"Down"` renders `"Down"` as the on state.
 
-  Otherwise the first series' last sample is drawn as digits, formatted for
-  the panel's unit and coloured by its thresholds, in the first font of the
+  Otherwise the first series, reduced by the panel's `reduceOptions.calcs`
+  (`GrafExTerm.Panel.Reduce`), is drawn as `GrafExTerm.Panel.Stat.Reading`
+  describes it: a value mapping's text, or the number formatted for the panel's
+  unit and decimals with the unit on its own line beneath, in the first font of the
   `:stat_fonts` application environment list that fits the panel. Names that
   are not in `Drafter.Widget.Digits.Font.names/0` are skipped; with none left
-  the list is `[:braille, :mini, :compact]`. Panels whose `graphMode` is
+  the list is `[:braille, :mini, :compact]`. Text no font fits is written plainly
+  on one row. Panels whose `graphMode` is
   `"area"` also get that series' history as a darker sparkline behind the
   digits. Numbers are centred in the panel.
 
-  Recognised units are `percent`, `percentunit`, `bytes`, `decbytes`, `bits`,
-  `short`, and the durations `s`, `ms` and `ns`; anything else is formatted
-  compactly. Durations are scaled to the largest of weeks, days, hours,
-  minutes or seconds that the value reaches.
+  `options.colorMode` decides where the reading's colour goes: `"value"` (the
+  default) colours the text, `"background"` and `"background_solid"` fill the
+  panel (see `background/2`) under a contrasting text colour, `"none"` leaves
+  both uncoloured.
   """
 
   import Drafter.App,
-    only: [vertical: 2, horizontal: 2, digits: 2, switch: 1, placeholder: 1]
+    only: [vertical: 2, horizontal: 2, digits: 2, label: 2, switch: 1, placeholder: 1]
 
-  alias Drafter.Format
   alias Drafter.Widget.Digits.Font
-  alias GrafExTerm.Panel.ColorRules
+  alias GrafExTerm.Panel.{ColorRules, Reduce}
+  alias GrafExTerm.Panel.Stat.Reading
 
   @doc """
   Builds the stat widget for `panel`.
@@ -41,9 +44,8 @@ defmodule GrafExTerm.Panel.Stat do
   An empty series list is valid and renders as zero. The numeric form reads
   only the first series; the switch form draws one switch per series.
 
-  Threshold colouring falls back to `{200, 200, 200}` when the panel defines
-  no thresholds or the reached step's colour names no colour (`"transparent"`,
-  `"text"`), and a step with no colour defaults to green.
+  The colour comes from a matching value mapping, else the last threshold step
+  reached, else `{200, 200, 200}`; a step with no colour is green.
   """
   @spec render(GrafExTerm.Dashboard.Types.Panel.t(), term(), non_neg_integer()) :: tuple()
   def render(panel, {:ok, series}, height) do
@@ -92,38 +94,60 @@ defmodule GrafExTerm.Panel.Stat do
   end
 
   defp render_numeric(panel, series, height) do
-    value = extract_last_value(series)
-    unit = get_in(panel.field_config, ["defaults", "unit"]) || ""
-    formatted = format_value(value, unit)
-    color = threshold_color(panel.field_config, value)
-    graph_mode = get_in(panel.options, ["graphMode"]) || "none"
+    reading = Reading.of(panel, reduced_value(panel, series))
+    {fg, bg} = colors(color_mode(panel), reading.color)
+    style = if bg, do: %{fg: fg, bg: bg}, else: %{fg: fg}
 
-    digit_opts =
-      if graph_mode == "area" do
-        hist = extract_history(series)
-        {bg_min, bg_max} = data_range(panel.field_config)
+    number =
+      digits(
+        reading.text,
+        [fit: number_fonts(), flex: 1, align: :center, style: style] ++
+          sparkline(panel, series, reading.color)
+      )
 
-        [
-          fit: number_fonts(),
-          flex: 1,
-          align: :center,
-          style: %{fg: color},
-          bg_data: hist,
-          color: dim(color),
-          bg_min: bg_min,
-          bg_max: bg_max
-        ]
-      else
-        [fit: number_fonts(), flex: 1, align: :center, style: %{fg: color}]
-      end
-
-    vertical(
-      [digits(formatted, digit_opts)],
-      height: height
-    )
+    vertical([number | unit_label(reading.unit, style)], height: height)
   end
 
-  @default_color {200, 200, 200}
+  @doc """
+  The colour a stat panel fills its frame with: the reading's colour when the
+  panel's `options.colorMode` is `"background"` or `"background_solid"`, else `nil`.
+  """
+  @spec background(GrafExTerm.Dashboard.Types.Panel.t(), term()) :: {byte(), byte(), byte()} | nil
+  def background(panel, {:ok, series}) do
+    case {color_mode(panel), boolean_mappings(panel.field_config)} do
+      {:background, :not_boolean} -> Reading.of(panel, reduced_value(panel, series)).color
+      _other -> nil
+    end
+  end
+
+  def background(_panel, _data), do: nil
+
+  defp color_mode(panel) do
+    case get_in(panel.options, ["colorMode"]) do
+      mode when mode in ["background", "background_solid"] -> :background
+      "none" -> :none
+      _value -> :value
+    end
+  end
+
+  defp colors(:background, color), do: {ColorRules.contrasting_fg(color), color}
+  defp colors(:none, _color), do: {nil, nil}
+  defp colors(:value, color), do: {color, nil}
+
+  defp unit_label("", _style), do: []
+  defp unit_label(unit, style), do: [label(unit, align: :center, style: style)]
+
+  defp sparkline(panel, series, color) do
+    if get_in(panel.options, ["graphMode"]) == "area" do
+      {bg_min, bg_max} = data_range(panel.field_config)
+      [bg_data: extract_history(series), color: dim(color), bg_min: bg_min, bg_max: bg_max]
+    else
+      []
+    end
+  end
+
+  defp reduced_value(_panel, []), do: 0.0
+  defp reduced_value(panel, [first | _]), do: Reduce.value(first.values, Reduce.calc(panel))
   @default_number_fonts [:braille, :mini, :compact]
 
   defp number_fonts do
@@ -145,19 +169,6 @@ defmodule GrafExTerm.Panel.Stat do
       {round(r * @sparkline_brightness), round(g * @sparkline_brightness),
        round(b * @sparkline_brightness)}
 
-  defp extract_last_value([]), do: 0.0
-
-  defp extract_last_value(series) do
-    series
-    |> List.first()
-    |> Map.get(:values, [])
-    |> List.last()
-    |> case do
-      nil -> 0.0
-      {_, val} -> val
-    end
-  end
-
   defp extract_history([]), do: []
 
   defp extract_history(series) do
@@ -172,28 +183,6 @@ defmodule GrafExTerm.Panel.Stat do
     min = Map.get(defaults, "min")
     max = Map.get(defaults, "max")
     {if(is_number(min), do: min, else: 0), if(is_number(max), do: max, else: nil)}
-  end
-
-  defp format_value(value, _unit) when not is_number(value), do: to_string(value)
-  defp format_value(value, "percent"), do: Format.percent(value, decimals: 1)
-  defp format_value(value, "percentunit"), do: Format.percent(value, as_ratio: true, decimals: 1)
-  defp format_value(value, "bytes"), do: Format.bytes(value)
-  defp format_value(value, "decbytes"), do: Format.bytes(value)
-  defp format_value(value, "bits"), do: Format.bytes(trunc(value / 8))
-  defp format_value(value, "short"), do: Format.compact(value)
-  defp format_value(value, "s"), do: format_duration(value)
-  defp format_value(value, "ms"), do: format_duration(value / 1000)
-  defp format_value(value, "ns"), do: format_duration(value / 1_000_000_000)
-  defp format_value(value, _unit), do: Format.compact(value)
-
-  defp format_duration(seconds) when is_number(seconds) do
-    cond do
-      seconds >= 7 * 24 * 3600 -> "#{Float.round(seconds / (7 * 24 * 3600), 1)}w"
-      seconds >= 24 * 3600 -> "#{Float.round(seconds / (24 * 3600), 1)}d"
-      seconds >= 3600 -> "#{Float.round(seconds / 3600, 1)}h"
-      seconds >= 60 -> "#{Float.round(seconds / 60, 1)}m"
-      true -> "#{Float.round(seconds * 1.0, 1)}s"
-    end
   end
 
   defp last_value([]), do: 0.0
@@ -285,22 +274,4 @@ defmodule GrafExTerm.Panel.Stat do
 
   defp resolve_color(nil), do: nil
   defp resolve_color(color), do: ColorRules.resolve_named_color(color)
-
-  defp threshold_color(field_config, value) do
-    steps =
-      field_config
-      |> get_in(["defaults", "thresholds", "steps"])
-      |> List.wrap()
-
-    steps
-    |> Enum.filter(fn step ->
-      threshold = Map.get(step, "value")
-      is_nil(threshold) or value >= threshold
-    end)
-    |> List.last()
-    |> case do
-      nil -> @default_color
-      step -> ColorRules.resolve_named_color(Map.get(step, "color", "green")) || @default_color
-    end
-  end
 end

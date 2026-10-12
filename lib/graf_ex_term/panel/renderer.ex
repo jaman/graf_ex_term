@@ -63,9 +63,19 @@ defmodule GrafExTerm.Panel.Renderer do
       title: " #{panel.title} ",
       border: :rounded,
       padding: 0,
-      highlight_focus: true
+      highlight_focus: true,
+      content_style: frame_fill(panel, data)
     )
   end
+
+  defp frame_fill(%{type: "stat"} = panel, data) do
+    case Stat.background(panel, data) do
+      nil -> %{}
+      color -> %{bg: color}
+    end
+  end
+
+  defp frame_fill(_panel, _data), do: %{}
 
   defp render_panel(%{type: "stat"} = panel, data, height, _opts),
     do: Stat.render(panel, data, height)

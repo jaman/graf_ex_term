@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `GrafExTerm.Format`: values are formatted the way Grafana formats them for a panel's `unit` and `decimals` — its automatic decimals, SI and binary prefixes, durations (`s`, `ms`, `m`, `h`, `d`, …), percentages and every unit id in Grafana's unit list (`GrafExTerm.Format.Units`). An unknown unit is written after the number, as Grafana writes a custom unit.
+- Value mappings (`GrafExTerm.Panel.ValueMapping`): `value`, `range`, `regex` and `special` mappings from `fieldConfig.defaults.mappings` replace a stat's text and colour, first match winning.
+- Stat panels honour `options.colorMode`: `"value"` colours the text, `"background"` and `"background_solid"` fill the frame, `"none"` leaves both uncoloured. The unit is drawn on its own line beneath the number (`GrafExTerm.Panel.Stat.Reading`).
+- Timeseries hover readout lists every series by name with its value formatted for the panel's unit and decimals, ordered by `options.tooltip.sort`.
+- The dashboard's own time range is used: `time.from`/`time.to` in Grafana date math (`now-6h`, `now-1d/d`, `now/w`) or absolute times (`GrafExTerm.Dashboard.TimeRange`). `GRAF_EX_TERM_TIME_RANGE` (`:time_range_seconds`) still overrides it when set; a dashboard without a time range spans the last hour. `GrafExTerm.Refresh.Scheduler.span/2` gives the span.
+- Legacy `graph` panels are converted as Grafana converts them to `timeseries` (`GrafExTerm.Dashboard.GraphMigration`): `yaxes` unit, decimals and limits, `bars`/`lines`/`points`, `fill`, `linewidth`, `stack`, `nullPointMode: "connected"`, `steppedLine`, `tooltip` sorting and `seriesOverrides` transforms.
+
+### Changed
+
+- Timeseries panels draw lines unless the panel fills them, as Grafana does by default: `fillOpacity` above 0 or `stacking.mode: "normal"` draws areas, `drawStyle: "points"` draws unjoined points, `drawStyle: "bars"` bars.
+- Timeseries series are placed on the query window's time grid: a series that starts late or stops early sits at its real time with gaps where it has no samples, instead of being stretched from the left edge. `custom.spanNulls` joins gaps (`true`, or a limit in milliseconds).
+- `GrafExTerm.Refresh.DataCache` entries carry each panel's query window (`:windows`); `GrafExTerm.Panel.Prepare.all/5`, `refilter/5` and `single/4` and `GrafExTerm.Panel.Timeseries.prepare/3` take them.
+- Stat text that no font in `:stat_fonts` fits is written in plain characters on one row, so `SUBSCRIBED` in a narrow panel no longer switches to a clipped smaller font.
+
+### Fixed
+
+- Stat values such as `49 s` read correctly: the unit is no longer drawn in the digit font next to the number, where the braille `s` looked like a `5`.
+- Hiding the dashboard list with `b` no longer gives every panel a new widget identity, which left the previous layout's widgets registered and lost panel state while scrolling.
+
 ## [0.1.1]
 
 ### Added

@@ -18,7 +18,7 @@
       "id": 2,
       "type": "stat",
       "title": "Services",
-      "gridPos": { "x": 0, "y": 2, "w": 8, "h": 3 },
+      "gridPos": { "x": 0, "y": 2, "w": 4, "h": 3 },
       "targets": [{ "refId": "A", "expr": "demo_up", "legendFormat": "{{service}}" }],
       "fieldConfig": {
         "defaults": {
@@ -31,6 +31,29 @@
               }
             }
           ]
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Exporter -> tickerplant",
+      "gridPos": { "x": 4, "y": 2, "w": 4, "h": 3 },
+      "options": { "colorMode": "background_solid", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "refId": "A", "expr": "demo_up{service=\"api\"}", "instant": true }],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "color": "red", "index": 0, "text": "DEAF" },
+                "1": { "color": "green", "index": 1, "text": "SUBSCRIBED" }
+              }
+            }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red" }, { "color": "green", "value": 1 }] }
         }
       }
     },

@@ -161,8 +161,10 @@ defmodule GrafExTerm.Dashboard.Types do
       * `:refresh` — the Grafana refresh string such as `"30s"`, `"5m"` or
         `"1h"`. `false` or an unparseable value means the application's
         `:default_refresh_ms` is used instead.
+      * `:time` — the dashboard time range as a `GrafExTerm.Dashboard.TimeRange`,
+        or `nil` when the source declared none or it could not be read.
     """
-    defstruct [:uid, :title, :description, :panels, :templating, :refresh]
+    defstruct [:uid, :title, :description, :panels, :templating, :refresh, :time]
 
     @type t :: %__MODULE__{
             uid: String.t(),
@@ -170,7 +172,8 @@ defmodule GrafExTerm.Dashboard.Types do
             description: String.t(),
             panels: [GrafExTerm.Dashboard.Types.Panel.t()],
             templating: [GrafExTerm.Dashboard.Types.TemplateVar.t()],
-            refresh: String.t() | false
+            refresh: String.t() | false,
+            time: GrafExTerm.Dashboard.TimeRange.t() | nil
           }
   end
 end

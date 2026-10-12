@@ -69,8 +69,9 @@ defmodule GrafExTerm.Screen.Viewer do
       :unchanged ->
         state
 
-      {:updated, %{panel_data: panel_data, version: version}} ->
-        prepared = Prepare.all(panel_data, state.dashboard.panels, nil, state.collapsed_rows)
+      {:updated, %{panel_data: panel_data, windows: windows, version: version}} ->
+        prepared =
+          Prepare.all(panel_data, state.dashboard.panels, nil, state.collapsed_rows, windows)
 
         %{
           state

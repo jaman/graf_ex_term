@@ -21,7 +21,9 @@ defmodule GrafExTerm do
       `http://localhost:9090`.
     * `:theme` — Drafter theme name. Defaults to `"tokyo-night"`.
     * `:height_ratio` — terminal rows per Grafana grid unit. Defaults to `3`.
-    * `:time_range_seconds` — width of the query window. Defaults to `3600`.
+    * `:time_range_seconds` — width of the query window, back from now. When
+      unset, each dashboard's own `time` range is used, or the last 3600
+      seconds for a dashboard without one.
     * `:chart_resolution` — samples per series a panel is queried for until
       the terminal width is known; after that the step is sized to the panel.
       Defaults to `300`.

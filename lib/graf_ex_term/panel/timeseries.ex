@@ -1,18 +1,35 @@
 defmodule GrafExTerm.Panel.Timeseries do
   @moduledoc """
-  Draws Grafana `timeseries` and `graph` panels as braille area or bar charts.
+  Draws Grafana `timeseries` and `graph` panels as line, area or bar charts.
 
-  Preparation and rendering are split. `prepare/2` does the work that depends
-  only on the data — unit scaling, ordering, axis options — so a screen can do
-  it once when data arrives rather than on every frame; `render/3` turns the
-  prepared result into a widget. Calling `render/3` on raw `{:ok, series}`
-  prepares it first, so the split is an optimisation the caller may skip.
+  Preparation and rendering are split. `prepare/3` does the work that depends
+  only on the data — unit scaling, time alignment, ordering, axis options — so a
+  screen can do it once when data arrives rather than on every frame;
+  `render/3` turns the prepared result into a widget. Calling `render/3` on raw
+  `{:ok, series}` prepares it first.
 
-  Series are stacked when the panel's `custom.stacking.mode` is `"normal"`,
-  smallest average magnitude at the bottom; otherwise each is drawn from the
-  baseline, largest first, so larger areas do not hide smaller ones. A series carrying a `:weight` above 1
-  — the marker `GrafExTerm.Refresh.SeriesClusterer` puts on a merged cluster —
-  is drawn with an opacity proportional to how many series it stands for.
+  Every series is placed on one time grid: the query window's steps when the
+  window is given, else every timestamp any series has. A step a series has no
+  sample for is a gap, drawn as nothing, so a series that starts or stops partway
+  through the window sits at its true time. `custom.spanNulls` joins gaps as
+  Grafana does: `true` joins every gap between two samples, a number of
+  milliseconds joins gaps no longer than that.
+
+  The panel's `fieldConfig.defaults.custom` picks the drawing, with Grafana's
+  defaults (`drawStyle` `"line"`, `fillOpacity` 0):
+
+    * `drawStyle` `"bars"` — a `:bar` chart for one series, `:clustered_bar`
+      for several, `:stacked_bar` when `stacking.mode` is `"normal"`; gaps are zero
+    * `drawStyle` `"points"` — a `:line` chart of unjoined points
+    * `fillOpacity` above 0, or `stacking.mode` `"normal"` — a `:braille_area`
+      chart, stacked when `stacking.mode` is `"normal"`, smallest average
+      magnitude at the bottom; otherwise each area is drawn from the baseline,
+      largest first, so larger areas do not hide smaller ones
+    * anything else — a `:line` chart
+
+  A series carrying a `:weight` above 1 — the marker
+  `GrafExTerm.Refresh.SeriesClusterer` puts on a merged cluster — is drawn as an
+  area with an opacity proportional to how many series it stands for.
 
   Units drive the y-axis. `percentunit` values are multiplied by 100 and the
   axis pinned to 0..100; `percent` is pinned without scaling; byte and bit
@@ -20,13 +37,17 @@ defmodule GrafExTerm.Panel.Timeseries do
   with the matching per-second suffix. Explicit `min`/`max` from the panel's
   `fieldConfig` are applied for every unit except `percentunit`.
 
-  Each sample time becomes an x label, local `HH:MM:SS`, which the chart's value
-  readout shows for the column under the pointer. The `:chart_renderer`
-  application environment value, when set, is passed to the chart as its
-  `:renderer` (see `Drafter.Widget.Chart`).
+  Each grid time becomes an x label, local `HH:MM:SS`. The chart's value
+  readout lists every series by name with its value formatted for the panel's
+  unit and decimals (`GrafExTerm.Format`), ordered by `options.tooltip.sort`.
+  The `:chart_renderer` application environment value, when set, is passed to
+  the chart as its `:renderer` (see `Drafter.Widget.Chart`).
   """
 
   import Drafter.App, only: [chart: 2, placeholder: 1]
+
+  alias GrafExTerm.Format
+  alias GrafExTerm.Refresh.QueryWindow
 
   @palette [
     {100, 200, 255},
@@ -42,58 +63,51 @@ defmodule GrafExTerm.Panel.Timeseries do
 
   `panel` is a `GrafExTerm.Dashboard.Types.Panel`. `data` is `{:ok, series}`;
   anything else is returned unchanged, so error tuples pass through to
-  `render/3` and become a placeholder there.
+  `render/3` and become a placeholder there. `window` is the
+  `GrafExTerm.Refresh.QueryWindow` the series were fetched over, or `nil`.
 
-  Returns `{:prepared_ts, %{values: values, opts: opts}}`. When the panel sets
-  `drawStyle` to `"bars"`, one series is a `:bar` chart of plain numbers and
-  several are a `:clustered_bar` chart, or `:stacked_bar` when
-  `custom.stacking.mode` is `"normal"`; otherwise the chart is
-  `:braille_area`.
+  Returns `{:prepared_ts, %{values: values, opts: opts}}`.
   """
-  @spec prepare(map(), {:ok, list()} | any()) :: {:prepared_ts, map()} | any()
-  def prepare(panel, {:ok, series}) do
-    unit = get_in(panel.field_config, ["defaults", "unit"]) || ""
-    {scaled_series, unit_axis_opts} = scale_for_unit(series, unit)
-    stacked? = stacked?(panel)
-    sorted = scaled_series |> sort_largest_first() |> draw_order(stacked?)
-    {type, values} = chart_data(panel, sorted)
+  @spec prepare(map(), {:ok, list()} | any(), QueryWindow.t() | nil) ::
+          {:prepared_ts, map()} | any()
+  def prepare(panel, data, window \\ nil)
 
-    has_weights = Enum.any?(sorted, fn s -> Map.get(s, :weight, 1) > 1 end)
-    num_series = length(sorted)
+  def prepare(panel, {:ok, series}, window) do
+    defaults = get_in(panel.field_config, ["defaults"]) || %{}
+    custom = defaults["custom"] || %{}
+    unit = defaults["unit"] || ""
+    {scaled_series, unit_axis_opts, scale} = scale_for_unit(series, unit)
+    stacked? = stacked?(custom)
+    grid = time_grid(scaled_series, window)
 
-    braille_opts =
-      if type == :braille_area do
-        fill =
-          cond do
-            has_weights -> 0.6
-            num_series > 3 -> 0.6
-            true -> 1.0
-          end
+    ordered =
+      scaled_series
+      |> sort_largest_first()
+      |> draw_order(stacked?)
+      |> Enum.map(&on_grid(&1, grid, window, custom["spanNulls"]))
 
-        [show_baseline: true, fill_opacity: fill, zero_center: :linear, stacked: stacked?]
-      else
-        []
-      end
+    {type, values} = chart_data(custom, ordered)
 
     opts =
       [chart_type: type] ++
-        braille_opts ++
-        [show_axes: true, colors: @palette, x_labels: time_labels(sorted)] ++
+        style_opts(type, custom, ordered, stacked?) ++
+        [show_axes: true, colors: @palette, x_labels: time_labels(grid)] ++
+        readout_opts(panel, ordered, defaults, scale) ++
         renderer_opts() ++
-        base_axis_opts(panel, unit) ++
+        base_axis_opts(defaults, unit) ++
         unit_axis_opts
 
     {:prepared_ts, %{values: values, opts: opts}}
   end
 
-  def prepare(_panel, other), do: other
+  def prepare(_panel, other, _window), do: other
 
   @doc """
   Builds the chart widget for `panel`.
 
   `panel` is a `GrafExTerm.Dashboard.Types.Panel`, and its `:id` becomes the
   widget id `:"chart_<id>"`. `data` is either a `{:prepared_ts, map}` from
-  `prepare/2` or a raw `{:ok, series}`, which is prepared inline; anything
+  `prepare/3` or a raw `{:ok, series}`, which is prepared inline; anything
   else draws a "No data" placeholder. `height` is the widget height in
   terminal rows.
   """
@@ -111,13 +125,65 @@ defmodule GrafExTerm.Panel.Timeseries do
     placeholder(label: "No data", height: height)
   end
 
-  defp time_labels([]), do: []
+  defp time_grid(_series, %QueryWindow{from: from, to: to, step: step}),
+    do: Enum.to_list(from..to//step)
 
-  defp time_labels(series) do
+  defp time_grid(series, nil) do
     series
-    |> Enum.max_by(&length(&1.values))
-    |> Map.fetch!(:values)
-    |> Enum.map(fn {ts, _} -> ts |> local_time() |> Time.to_string() end)
+    |> Enum.flat_map(fn s -> Enum.map(s.values, &elem(&1, 0)) end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp on_grid(series, grid, window, span_nulls) do
+    by_time = Map.new(series.values, fn {ts, value} -> {snap(ts, window), value} end)
+
+    values =
+      grid
+      |> Enum.map(&{&1, Map.get(by_time, &1)})
+      |> span_gaps(span_nulls)
+
+    %{series | values: values}
+  end
+
+  defp snap(ts, nil), do: ts
+  defp snap(ts, %QueryWindow{from: from, step: step}), do: from + round((ts - from) / step) * step
+
+  defp span_gaps(points, limit) when limit == true or (is_number(limit) and limit > 0) do
+    points
+    |> Enum.chunk_by(fn {_ts, value} -> is_nil(value) end)
+    |> join_gaps(nil, limit, [])
+  end
+
+  defp span_gaps(points, _limit), do: points
+
+  defp join_gaps([], _previous, _limit, done), do: done |> Enum.reverse() |> Enum.concat()
+
+  defp join_gaps([[{_, nil} | _] = gap, [next | _] = known | rest], previous, limit, done)
+       when previous != nil do
+    joined = if joinable?(previous, next, limit), do: interpolate(gap, previous, next), else: gap
+    join_gaps(rest, List.last(known), limit, [known, joined | done])
+  end
+
+  defp join_gaps([run | rest], _previous, limit, done),
+    do: join_gaps(rest, last_sample(run), limit, [run | done])
+
+  defp last_sample(run) do
+    case List.last(run) do
+      {_ts, nil} -> nil
+      sample -> sample
+    end
+  end
+
+  defp joinable?(_previous, _next, true), do: true
+  defp joinable?({from, _}, {to, _}, limit_ms), do: (to - from) * 1000 <= limit_ms
+
+  defp interpolate(gap, {t0, v0}, {t1, v1}) do
+    Enum.map(gap, fn {ts, nil} -> {ts, v0 + (v1 - v0) * (ts - t0) / (t1 - t0)} end)
+  end
+
+  defp time_labels(grid) do
+    Enum.map(grid, fn ts -> ts |> local_time() |> Time.to_string() end)
   end
 
   defp local_time(unix_seconds) do
@@ -132,73 +198,95 @@ defmodule GrafExTerm.Panel.Timeseries do
     end
   end
 
-  defp stacked?(panel) do
-    get_in(panel.field_config, ["defaults", "custom", "stacking", "mode"]) == "normal"
-  end
+  defp stacked?(custom), do: get_in(custom, ["stacking", "mode"]) == "normal"
 
   defp draw_order(series, true), do: series
   defp draw_order(series, false), do: Enum.reverse(series)
 
-  defp chart_data(panel, series) do
-    custom = get_in(panel.field_config, ["defaults", "custom"]) || %{}
+  defp chart_data(%{"drawStyle" => "bars"} = custom, series),
+    do: bar_data(Enum.map(series, &bar_values/1), get_in(custom, ["stacking", "mode"]))
 
-    case Map.get(custom, "drawStyle") do
-      "bars" -> bar_data(Enum.map(series, &plain_values/1), get_in(custom, ["stacking", "mode"]))
-      _ -> {:braille_area, extract_values(series)}
-    end
+  defp chart_data(custom, series) do
+    if area?(custom, series),
+      do: {:braille_area, area_values(series)},
+      else: {:line, Enum.map(series, &line_values/1)}
   end
+
+  defp area?(custom, series) do
+    fill_opacity(custom) > 0 or stacked?(custom) or Enum.any?(series, &weighted?/1)
+  end
+
+  defp fill_opacity(%{"fillOpacity" => opacity}) when is_number(opacity), do: opacity
+  defp fill_opacity(_custom), do: 0
+
+  defp weighted?(series), do: Map.get(series, :weight, 1) > 1
+
+  defp style_opts(:braille_area, _custom, series, stacked?) do
+    fill = if Enum.any?(series, &weighted?/1) or length(series) > 3, do: 0.6, else: 1.0
+    [show_baseline: true, fill_opacity: fill, zero_center: :linear, stacked: stacked?]
+  end
+
+  defp style_opts(:line, custom, _series, _stacked?),
+    do: [connect_lines: custom["drawStyle"] != "points"]
+
+  defp style_opts(_bars, _custom, _series, _stacked?), do: []
 
   defp bar_data([only], _stacking), do: {:bar, only}
   defp bar_data([], _stacking), do: {:bar, []}
   defp bar_data(series, "normal"), do: {:stacked_bar, series}
   defp bar_data(series, _stacking), do: {:clustered_bar, series}
 
-  defp plain_values(series), do: Enum.map(series.values, &elem(&1, 1))
+  defp bar_values(series), do: Enum.map(series.values, fn {_ts, value} -> value || 0 end)
+  defp line_values(series), do: Enum.map(series.values, &elem(&1, 1))
 
-  defp base_axis_opts(panel, unit) do
-    defaults = get_in(panel.field_config, ["defaults"]) || %{}
-    min = Map.get(defaults, "min")
-    max = Map.get(defaults, "max")
+  defp readout_opts(panel, series, defaults, scale) do
+    [
+      series_names: Enum.map(series, &Map.get(&1, :name)),
+      readout_format: readout_format(defaults["unit"], decimals(defaults["decimals"]), scale),
+      readout_sort: readout_sort(get_in(panel.options || %{}, ["tooltip", "sort"]))
+    ]
+  end
 
-    opts = []
+  defp readout_format(unit, decimals, scale) do
+    fn value -> (value / scale) |> Format.format(unit, decimals) |> Format.to_string() end
+  end
 
-    opts =
-      if is_number(min) and unit not in ["percentunit"],
-        do: Keyword.put(opts, :min_value, min),
-        else: opts
+  defp decimals(decimals) when is_integer(decimals), do: decimals
+  defp decimals(_automatic), do: nil
 
-    opts =
-      if is_number(max) and unit not in ["percentunit"],
-        do: Keyword.put(opts, :max_value, max),
-        else: opts
+  defp readout_sort("asc"), do: :asc
+  defp readout_sort("desc"), do: :desc
+  defp readout_sort(_none), do: :none
 
-    opts
+  defp base_axis_opts(defaults, unit) do
+    [min_value: defaults["min"], max_value: defaults["max"]]
+    |> Enum.filter(fn {_key, limit} -> is_number(limit) and unit != "percentunit" end)
   end
 
   defp scale_for_unit(series, "percentunit") do
     scaled = multiply_series(series, 100.0)
     labels = Enum.map([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100], &"#{&1}%")
-    {scaled, [min_value: 0, max_value: 100, y_labels: labels]}
+    {scaled, [min_value: 0, max_value: 100, y_labels: labels], 100.0}
   end
 
   defp scale_for_unit(series, unit) when unit in ["percent"] do
     labels = Enum.map([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100], &"#{&1}%")
-    {series, [min_value: 0, max_value: 100, y_labels: labels]}
+    {series, [min_value: 0, max_value: 100, y_labels: labels], 1.0}
   end
 
   defp scale_for_unit(series, unit) when unit in ["bytes", "decbytes", "Bps", "binBps"] do
     {factor, suffix} = byte_si_scale(peak_value(series))
     scaled = multiply_series(series, 1.0 / factor)
-    {scaled, [y_labels: si_labels(peak_value(scaled), suffix)]}
+    {scaled, [y_labels: si_labels(peak_value(scaled), suffix)], 1.0 / factor}
   end
 
   defp scale_for_unit(series, unit) when unit in ["bps", "bits"] do
     {factor, suffix} = bit_si_scale(peak_value(series))
     scaled = multiply_series(series, 1.0 / factor)
-    {scaled, [y_labels: si_labels(peak_value(scaled), suffix)]}
+    {scaled, [y_labels: si_labels(peak_value(scaled), suffix)], 1.0 / factor}
   end
 
-  defp scale_for_unit(series, _unit), do: {series, []}
+  defp scale_for_unit(series, _unit), do: {series, [], 1.0}
 
   defp multiply_series(series, factor) do
     Enum.map(series, fn s ->
@@ -247,20 +335,19 @@ defmodule GrafExTerm.Panel.Timeseries do
     sum / length(values)
   end
 
-  defp extract_values([]), do: []
-
-  defp extract_values(series) do
+  defp area_values(series) do
     max_weight = series |> Enum.map(&Map.get(&1, :weight, 1)) |> Enum.max(fn -> 1 end) |> max(1)
-    has_weights = max_weight > 1
-    Enum.map(series, &extract_series_values(&1, has_weights, max_weight))
+    Enum.map(series, &area_series_values(&1, max_weight > 1, max_weight))
   end
 
-  defp extract_series_values(s, true, max_weight) do
-    normalized = min(1.0, Map.get(s, :weight, 1) / max_weight)
-    Enum.map(s.values, fn {_ts, val} -> {val, normalized} end)
+  defp area_series_values(series, true, max_weight) do
+    normalized = min(1.0, Map.get(series, :weight, 1) / max_weight)
+
+    Enum.map(series.values, fn
+      {_ts, nil} -> nil
+      {_ts, value} -> {value, normalized}
+    end)
   end
 
-  defp extract_series_values(s, false, _max_weight) do
-    Enum.map(s.values, fn {_ts, val} -> val end)
-  end
+  defp area_series_values(series, false, _max_weight), do: line_values(series)
 end

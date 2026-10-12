@@ -4,7 +4,7 @@ defmodule GrafExTerm.MixProject do
   def project do
     [
       app: :graf_ex_term,
-      version: "0.1.1",
+      version: "0.1.2",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -31,7 +31,7 @@ defmodule GrafExTerm.MixProject do
 
   defp deps do
     [
-      family(:drafter, "~> 0.5.4", "../drafter"),
+      family(:drafter, "~> 0.5.5", "../drafter"),
       {:req, "~> 0.7"},
       {:jason, "~> 1.4"},
       {:phoenix_pubsub, "~> 2.1"},

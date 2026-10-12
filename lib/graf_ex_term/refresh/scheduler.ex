@@ -23,8 +23,8 @@ defmodule GrafExTerm.Refresh.Scheduler do
   or it will keep querying panels the user cannot see. The set starts empty,
   meaning everything is queried, even if the screen opens with rows collapsed.
 
-  Each panel's window and step come from `GrafExTerm.Refresh.QueryWindow`:
-  `:time_range_seconds` (default 3600) back from now, sampled about twice per
+  Each panel's window and step come from `GrafExTerm.Refresh.QueryWindow`, over
+  the span `span/2` gives for the dashboard, sampled about twice per
   terminal column the panel occupies. The column count is the `:columns`
   start option, kept current with `set_columns/2`; until it is known,
   `:chart_resolution` (default 300) samples are fetched per panel. The Grafana
@@ -57,7 +57,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
 
   use GenServer
 
-  alias GrafExTerm.Dashboard.Store
+  alias GrafExTerm.Dashboard.{Store, TimeRange}
   alias GrafExTerm.Dashboard.Types.Dashboard
   alias GrafExTerm.Dashboard.Visibility
   alias GrafExTerm.Datasource.{Demo, Loki, Prometheus}
@@ -67,6 +67,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
   @overlap_steps 2
   @default_log_lines 1000
   @resize_settle_ms 300
+  @default_span_seconds 3600
 
   @doc """
   Starts a scheduler and performs the first fetch.
@@ -133,6 +134,27 @@ defmodule GrafExTerm.Refresh.Scheduler do
       [] -> :ok
     end
   end
+
+  @doc """
+  The end of the query span, in Unix seconds, and its length in seconds, for a
+  dashboard whose `:time` is `time` at the current time `now`.
+
+  The `:time_range_seconds` application environment value, when set, makes the
+  span that many seconds back from `now`. Otherwise the dashboard's
+  `GrafExTerm.Dashboard.TimeRange` decides, and a dashboard with none spans the
+  last 3600 seconds.
+  """
+  @spec span(TimeRange.t() | nil, integer()) :: {integer(), pos_integer()}
+  def span(time, now) do
+    case {Application.get_env(:graf_ex_term, :time_range_seconds), time} do
+      {seconds, _time} when is_integer(seconds) -> {now, seconds}
+      {nil, %TimeRange{} = time} -> resolved_span(TimeRange.resolve(time, now), now)
+      {nil, nil} -> {now, @default_span_seconds}
+    end
+  end
+
+  defp resolved_span({from, to}, _now) when to > from, do: {to, to - from}
+  defp resolved_span(_backwards, now), do: {now, @default_span_seconds}
 
   @impl GenServer
   def init({dashboard, opts}) do
@@ -215,14 +237,17 @@ defmodule GrafExTerm.Refresh.Scheduler do
       )
       |> Enum.zip(panels)
       |> Enum.map(fn
-        {{:ok, {result, held}}, panel} -> {panel.id, result, held}
-        {{:exit, _reason}, panel} -> {panel.id, {:error, :timeout}, nil}
+        {{:ok, {result, held, window}}, panel} -> {panel.id, result, held, window}
+        {{:exit, _reason}, panel} -> {panel.id, {:error, :timeout}, nil, nil}
       end)
 
-    panel_data = Map.new(fetched, fn {id, result, _held} -> {id, result} end)
-    held = for {id, _result, entry} <- fetched, entry != nil, into: %{}, do: {id, entry}
+    panel_data = Map.new(fetched, fn {id, result, _held, _window} -> {id, result} end)
+    held = for {id, _result, entry, _window} <- fetched, entry != nil, into: %{}, do: {id, entry}
 
-    DataCache.put(dashboard.uid, panel_data)
+    windows =
+      for {id, _result, _held, window} <- fetched, window != nil, into: %{}, do: {id, window}
+
+    DataCache.put(dashboard.uid, panel_data, windows)
 
     Phoenix.PubSub.broadcast(
       GrafExTerm.PubSub,
@@ -235,6 +260,7 @@ defmodule GrafExTerm.Refresh.Scheduler do
 
   defp fetch_context(state) do
     uid = state.dashboard.uid
+    {now, range} = span(state.dashboard.time, System.system_time(:second))
     user_vars = fetch_vars(uid)
     app_datasources = merge_source_override(uid)
     stored_datasource_map = Store.get_datasource_map(uid)
@@ -244,8 +270,8 @@ defmodule GrafExTerm.Refresh.Scheduler do
       app_datasources: app_datasources,
       stored_datasource_map: stored_datasource_map,
       fingerprint: :erlang.phash2({user_vars, app_datasources, stored_datasource_map}),
-      now: System.system_time(:second),
-      range: Application.get_env(:graf_ex_term, :time_range_seconds, 3600),
+      now: now,
+      range: range,
       columns: state.columns,
       fallback_points: Application.get_env(:graf_ex_term, :chart_resolution, 300)
     }
@@ -263,9 +289,15 @@ defmodule GrafExTerm.Refresh.Scheduler do
     vars = Map.merge(builtin_vars(window), context.user_vars)
 
     cond do
-      panel.type == "logs" -> {fetch_logs(panel, window, vars, context), nil}
-      instant_table_panel?(panel) -> {fetch_instant_table(panel, vars, context), nil}
-      true -> fetch_range_panel(panel, window, vars, context, held)
+      panel.type == "logs" ->
+        {fetch_logs(panel, window, vars, context), nil, nil}
+
+      instant_table_panel?(panel) ->
+        {fetch_instant_table(panel, vars, context), nil, nil}
+
+      true ->
+        {result, held_entry} = fetch_range_panel(panel, window, vars, context, held)
+        {result, held_entry, window}
     end
   end
 

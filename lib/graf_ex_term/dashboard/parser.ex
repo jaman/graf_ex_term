@@ -5,12 +5,17 @@ defmodule GrafExTerm.Dashboard.Parser do
 
   Parsing is total: every field the source omits gets a documented default, so
   the result is always a fully populated `Dashboard` and no consumer has to
-  guard against `nil`.
+  guard against `nil`, except on the dashboard's `:time`, which is `nil` when the
+  source has no readable time range.
+
+  A `graph` panel's `fieldConfig` and `options` are those
+  `GrafExTerm.Dashboard.GraphMigration` derives from its legacy settings.
 
       {:ok, raw} = GrafExTerm.Dashboard.Loader.load(uri)
       {:ok, dashboard} = GrafExTerm.Dashboard.Parser.parse(raw)
   """
 
+  alias GrafExTerm.Dashboard.{GraphMigration, TimeRange}
   alias GrafExTerm.Dashboard.Types.{Dashboard, Panel, Target, TemplateVar}
 
   @doc """
@@ -48,7 +53,8 @@ defmodule GrafExTerm.Dashboard.Parser do
       description: Map.get(raw, "description", ""),
       panels: panels,
       templating: templating,
-      refresh: Map.get(raw, "refresh", false)
+      refresh: Map.get(raw, "refresh", false),
+      time: TimeRange.parse(Map.get(raw, "time"))
     }
 
     {:ok, dashboard}
@@ -60,6 +66,17 @@ defmodule GrafExTerm.Dashboard.Parser do
   end
 
   defp flatten_panel(panel), do: [parse_panel(panel)]
+
+  defp parse_panel(%{"type" => "graph"} = raw) do
+    migrated = GraphMigration.migrate(raw)
+
+    %{
+      parse_panel(Map.delete(raw, "type"))
+      | type: "graph",
+        field_config: migrated.field_config,
+        options: migrated.options
+    }
+  end
 
   defp parse_panel(raw) do
     %Panel{

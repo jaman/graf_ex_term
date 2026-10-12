@@ -67,6 +67,7 @@ defmodule GrafExTerm.Screen.Main do
       sidebar: true,
       dashboard_title: nil,
       dashboard_refresh: nil,
+      dashboard_time: nil,
       updated_at: nil
     }
   end
@@ -113,9 +114,15 @@ defmodule GrafExTerm.Screen.Main do
       :unchanged ->
         state
 
-      {:updated, %{panel_data: panel_data, version: version}} ->
+      {:updated, %{panel_data: panel_data, windows: windows, version: version}} ->
         prepared =
-          Prepare.all(panel_data, state.selected_panels, state.row_filter, state.collapsed_rows)
+          Prepare.all(
+            panel_data,
+            state.selected_panels,
+            state.row_filter,
+            state.collapsed_rows,
+            windows
+          )
 
         %{
           state
@@ -135,7 +142,8 @@ defmodule GrafExTerm.Screen.Main do
     vertical([
       StatusBar.render(%{
         title: state.dashboard_title,
-        range_seconds: Application.get_env(:graf_ex_term, :time_range_seconds, 3600),
+        range_seconds:
+          state.dashboard_time |> Scheduler.span(System.system_time(:second)) |> elem(1),
         refresh: state.dashboard_refresh,
         loading: state.loading,
         updated_at: state.updated_at
@@ -173,6 +181,7 @@ defmodule GrafExTerm.Screen.Main do
              selected_panels: dashboard.panels,
              dashboard_title: dashboard.title,
              dashboard_refresh: dashboard.refresh,
+             dashboard_time: dashboard.time,
              updated_at: nil,
              prepared_panel_data: %{},
              variables: initial_variables(dashboard),
@@ -272,8 +281,6 @@ defmodule GrafExTerm.Screen.Main do
     :ok
   end
 
-  defp sidebar(%{sidebar: false}), do: []
-
   defp sidebar(state) do
     [
       vertical(
@@ -286,7 +293,8 @@ defmodule GrafExTerm.Screen.Main do
             flex: 1
           )
         ],
-        width: @sidebar_width
+        width: @sidebar_width,
+        visible: state.sidebar
       )
     ]
   end
@@ -378,14 +386,20 @@ defmodule GrafExTerm.Screen.Main do
   end
 
   defp refilter(state, filter) do
-    panel_data =
+    {panel_data, windows} =
       case DataCache.get(state.selected_uid) do
-        %{panel_data: panel_data} -> panel_data
-        nil -> %{}
+        %{panel_data: panel_data, windows: windows} -> {panel_data, windows}
+        nil -> {%{}, %{}}
       end
 
     prepared =
-      Prepare.refilter(state.prepared_panel_data, panel_data, state.selected_panels, filter)
+      Prepare.refilter(
+        state.prepared_panel_data,
+        panel_data,
+        state.selected_panels,
+        filter,
+        windows
+      )
 
     %{state | prepared_panel_data: prepared, row_filter: filter}
   end

@@ -94,7 +94,7 @@ config :graf_ex_term,
 | `GRAF_EX_TERM_THEME` | Drafter theme | `gruvbox-dark` |
 | `GRAF_EX_TERM_HEIGHT_RATIO` | terminal rows per Grafana grid unit | `3` |
 | `GRAF_EX_TERM_REFRESH_MS` | refresh interval when the dashboard sets none | `30000` |
-| `GRAF_EX_TERM_TIME_RANGE` | seconds of history shown | `3600` |
+| `GRAF_EX_TERM_TIME_RANGE` | seconds of history shown, overriding the dashboard's own time range | the dashboard's `time`, else `3600` |
 | `GRAF_EX_TERM_CHART_RESOLUTION` | samples per panel before the terminal width is known | `300` |
 | `GRAF_EX_TERM_STAT_FONTS` | fonts for stat numbers, largest first, comma separated; the first that fits the panel is used. Built-in: `block`, `compact`, `tall`, `pixel`, `braille`; bundled FIGlet: `banner`, `big`, `blocks`, `bubble`, `digital`, `ivrit`, `lean`, `mini`, `script`, `shadow`, `slant`, `small`, `smscript`, `standard`, `term` | `braille,mini,compact` |
 | `GRAF_EX_TERM_RENDERER` | chart renderer: `text`, `braille`, `half`, `quad`, `sextant`, `octant`, `auto`, `pixel`, `kitty`, `iterm2`, `sixel` | Drafter's choice (`text`) |

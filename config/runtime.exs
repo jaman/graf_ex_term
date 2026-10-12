@@ -14,7 +14,11 @@ config :graf_ex_term,
   theme: System.get_env("GRAF_EX_TERM_THEME", "gruvbox-dark"),
   height_ratio: String.to_integer(System.get_env("GRAF_EX_TERM_HEIGHT_RATIO", "3")),
   default_refresh_ms: String.to_integer(System.get_env("GRAF_EX_TERM_REFRESH_MS", "30000")),
-  time_range_seconds: String.to_integer(System.get_env("GRAF_EX_TERM_TIME_RANGE", "3600")),
+  time_range_seconds:
+    (case System.get_env("GRAF_EX_TERM_TIME_RANGE") do
+       nil -> nil
+       seconds -> String.to_integer(seconds)
+     end),
   chart_resolution: String.to_integer(System.get_env("GRAF_EX_TERM_CHART_RESOLUTION", "300")),
   stat_fonts:
     (case System.get_env("GRAF_EX_TERM_STAT_FONTS") do
