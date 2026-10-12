@@ -51,7 +51,7 @@ Add GrafExTerm to a project:
 ```elixir
 def deps do
   [
-    {:graf_ex_term, "~> 0.1.0"}
+    {:graf_ex_term, "~> 0.1"}
   ]
 end
 ```
@@ -62,7 +62,7 @@ Or run it from a clone:
 git clone https://github.com/jaman/graf_ex_term
 cd graf_ex_term
 mix deps.get
-mix run --no-halt
+mix graf_ex_term
 ```
 
 When a `drafter` checkout sits next to `graf_ex_term`, it is used in place of the Hex package.

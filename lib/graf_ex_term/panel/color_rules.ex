@@ -9,57 +9,25 @@ defmodule GrafExTerm.Panel.ColorRules do
   base step, whose value is `null`, is never enough on its own — a
   `fieldConfig` with only a base step produces no colouring at all.
 
-  Colours may be Grafana palette names such as `"green"` or `"semi-dark-blue"`,
-  or `#rrggbb` hex. `"transparent"` and unrecognised names resolve to no
-  colour. Each background is paired with a foreground chosen for contrast, so
+  Colours are anything `GrafExTerm.Panel.GrafanaColor.resolve/1` accepts: Grafana
+  shade names such as `"semi-dark-blue"`, CSS colour names, hex, `rgb()`/`rgba()`
+  and `hsl()`. `"transparent"` and unrecognised names resolve to no colour. Each background is paired with a foreground chosen for contrast, so
   a caller gets a legible pair rather than having to compute one.
 
       %{cpu: color_fn} = GrafExTerm.Panel.ColorRules.build(field_config, columns)
       color_fn.(95)
   """
 
-  import Bitwise
-
-  @grafana_colors %{
-    "green" => {115, 191, 105},
-    "dark-green" => {55, 135, 45},
-    "light-green" => {150, 217, 141},
-    "yellow" => {242, 204, 12},
-    "orange" => {250, 150, 0},
-    "dark-orange" => {187, 111, 0},
-    "red" => {242, 73, 92},
-    "dark-red" => {196, 22, 42},
-    "light-red" => {255, 115, 131},
-    "blue" => {100, 149, 237},
-    "dark-blue" => {31, 96, 196},
-    "semi-dark-blue" => {50, 116, 217},
-    "light-blue" => {138, 184, 255},
-    "purple" => {163, 82, 204},
-    "dark-purple" => {123, 52, 164},
-    "light-purple" => {196, 175, 255},
-    "transparent" => nil
-  }
-
-  @contrast_cache Map.new(@grafana_colors, fn
-                    {_name, nil} ->
-                      {nil, {240, 240, 240}}
-
-                    {_name, {r, g, b} = bg} ->
-                      luma = 0.299 * r + 0.587 * g + 0.114 * b
-                      fg = if luma > 128, do: {15, 15, 15}, else: {240, 240, 240}
-                      {bg, fg}
-                  end)
+  alias GrafExTerm.Panel.GrafanaColor
 
   @doc """
   Resolves a Grafana colour to `{r, g, b}`.
 
-  `name` is a palette name such as `"green"`, `"dark-orange"` or
-  `"semi-dark-blue"`, or a `#rrggbb` hex string. Returns `nil` for
-  `"transparent"`, for a name outside the palette, and for hex that is not
-  exactly six valid hex digits.
+  Accepts what `GrafExTerm.Panel.GrafanaColor.resolve/1` accepts and returns
+  `nil` where it does.
   """
   @spec resolve_named_color(String.t()) :: {byte(), byte(), byte()} | nil
-  def resolve_named_color(name), do: resolve_color(name)
+  def resolve_named_color(name), do: GrafanaColor.resolve(name)
 
   @doc """
   Picks a legible foreground for the background `bg`.
@@ -68,15 +36,9 @@ defmodule GrafExTerm.Panel.ColorRules do
   the background's luma exceeds 128 and `{240, 240, 240}` otherwise.
   """
   @spec contrasting_fg({byte(), byte(), byte()}) :: {byte(), byte(), byte()}
-  def contrasting_fg({r, g, b} = bg) do
-    case Map.get(@contrast_cache, bg) do
-      nil ->
-        luma = 0.299 * r + 0.587 * g + 0.114 * b
-        if luma > 128, do: {15, 15, 15}, else: {240, 240, 240}
-
-      fg ->
-        fg
-    end
+  def contrasting_fg({r, g, b}) do
+    luma = 0.299 * r + 0.587 * g + 0.114 * b
+    if luma > 128, do: {15, 15, 15}, else: {240, 240, 240}
   end
 
   @doc """
@@ -144,7 +106,7 @@ defmodule GrafExTerm.Panel.ColorRules do
 
   defp extract_value_colors(options) do
     Enum.flat_map(options, fn {value, config} ->
-      case resolve_color(Map.get(config, "color")) do
+      case GrafanaColor.resolve(Map.get(config, "color")) do
         nil -> []
         color -> [{value, color}]
       end
@@ -154,7 +116,7 @@ defmodule GrafExTerm.Panel.ColorRules do
   defp parse_thresholds(%{"steps" => steps}) when is_list(steps) do
     steps
     |> Enum.map(fn step ->
-      {Map.get(step, "value"), resolve_color(Map.get(step, "color"))}
+      {Map.get(step, "value"), GrafanaColor.resolve(Map.get(step, "color"))}
     end)
     |> Enum.sort_by(fn {v, _} -> if is_nil(v), do: {0, 0}, else: {1, v} end)
   end
@@ -262,23 +224,4 @@ defmodule GrafExTerm.Panel.ColorRules do
   end
 
   defp to_number(_), do: nil
-
-  defp resolve_color(nil), do: nil
-  defp resolve_color("transparent"), do: nil
-
-  defp resolve_color("#" <> hex) do
-    case Integer.parse(hex, 16) do
-      {n, ""} when byte_size(hex) == 6 ->
-        r = Bitwise.bsr(n, 16) &&& 0xFF
-        g = Bitwise.bsr(n, 8) &&& 0xFF
-        b = n &&& 0xFF
-        {r, g, b}
-
-      _ ->
-        nil
-    end
-  end
-
-  defp resolve_color(name) when is_binary(name), do: Map.get(@grafana_colors, name)
-  defp resolve_color(_), do: nil
 end

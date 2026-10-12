@@ -7,7 +7,7 @@ defmodule GrafExTerm.Panel.ColorRulesTest do
     test "returns RGB tuple for known grafana color names" do
       assert ColorRules.resolve_named_color("green") == {115, 191, 105}
       assert ColorRules.resolve_named_color("red") == {242, 73, 92}
-      assert ColorRules.resolve_named_color("blue") == {100, 149, 237}
+      assert ColorRules.resolve_named_color("blue") == {87, 148, 242}
     end
 
     test "returns nil for transparent" do
@@ -65,7 +65,7 @@ defmodule GrafExTerm.Panel.ColorRulesTest do
       assert is_function(color_fn, 1)
 
       assert color_fn.(50) == %{bg: {115, 191, 105}, fg: {15, 15, 15}}
-      assert color_fn.(75) == %{bg: {242, 204, 12}, fg: {15, 15, 15}}
+      assert color_fn.(75) == %{bg: {250, 222, 42}, fg: {15, 15, 15}}
       assert color_fn.(95) == %{bg: {242, 73, 92}, fg: {240, 240, 240}}
     end
 

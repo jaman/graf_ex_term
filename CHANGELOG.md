@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.1]
 
 ### Added
 
@@ -11,6 +11,8 @@
 - `GrafExTerm.Panel.Prepare` and `GrafExTerm.Dashboard.Visibility`, shared by the main screen, the viewer and the scheduler.
 - Timeseries charts carry sample times as x labels for the chart value readout; `GRAF_EX_TERM_RENDERER` (`:chart_renderer`) picks the chart renderer. `LOKI` sets the default Loki URL.
 - Panel structs carry `:max_data_points` and `:min_interval`.
+- `mix graf_ex_term` runs the UI on your saved dashboards from a checkout; it replaces `run.exs`.
+- `GrafExTerm.Panel.GrafanaColor.resolve/1`: every colour Grafana accepts — its dark-theme shade names (`super-light-`, `light-`, plain, `semi-dark-`, `dark-` for each hue), CSS colour names, hex, `rgb()`/`rgba()` and `hsl()`. Table cells and stat panels use it.
 - `mix graf_ex_term.demo` (`GrafExTerm.Demo.run/1`): the showcase dashboard `priv/demo/showcase.json` on generated data from `GrafExTerm.Datasource.Demo` and `GrafExTerm.Datasource.Demo.Logs`, with a dashboard store under the system temp dir. A datasource config with `type: :demo` uses the generator anywhere.
 - `:store_dir` sets the directory the dashboard store writes under.
 - Stat numbers use the first font of `:stat_fonts` (`GRAF_EX_TERM_STAT_FONTS`, default `[:braille, :mini, :compact]`) that fits the panel; Drafter's bundled FIGlet fonts are registered at start.
@@ -30,6 +32,9 @@
 
 ### Fixed
 
+- A stat panel whose threshold colour Grafana resolves at runtime (`"text"`) or that graf_ex_term did not know (`rgba(...)`, `super-light-*`, CSS names) no longer crashes the screen; unknown colours draw in the default grey.
+- `red`, `yellow`, `orange`, `blue` and `purple` and their shades use Grafana's own values.
+- The README's run-from-a-checkout command is `mix graf_ex_term`; `mix run --no-halt` started the application without its UI.
 - A timeseries panel with `drawStyle: "bars"` no longer crashes the screen: one series draws as a `:bar` chart of numbers, several as `:clustered_bar`, or `:stacked_bar` with `stacking.mode: "normal"`.
 - Panels without targets are not queried.
 - The demo generator no longer returns negative values for metrics with a minimum and no maximum.

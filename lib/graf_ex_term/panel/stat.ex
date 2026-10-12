@@ -42,7 +42,8 @@ defmodule GrafExTerm.Panel.Stat do
   only the first series; the switch form draws one switch per series.
 
   Threshold colouring falls back to `{200, 200, 200}` when the panel defines
-  no thresholds, and a step with no colour defaults to green.
+  no thresholds or the reached step's colour names no colour (`"transparent"`,
+  `"text"`), and a step with no colour defaults to green.
   """
   @spec render(GrafExTerm.Dashboard.Types.Panel.t(), term(), non_neg_integer()) :: tuple()
   def render(panel, {:ok, series}, height) do
@@ -122,6 +123,7 @@ defmodule GrafExTerm.Panel.Stat do
     )
   end
 
+  @default_color {200, 200, 200}
   @default_number_fonts [:braille, :mini, :compact]
 
   defp number_fonts do
@@ -297,8 +299,8 @@ defmodule GrafExTerm.Panel.Stat do
     end)
     |> List.last()
     |> case do
-      nil -> {200, 200, 200}
-      step -> ColorRules.resolve_named_color(Map.get(step, "color", "green"))
+      nil -> @default_color
+      step -> ColorRules.resolve_named_color(Map.get(step, "color", "green")) || @default_color
     end
   end
 end

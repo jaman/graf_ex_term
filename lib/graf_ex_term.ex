@@ -8,8 +8,9 @@ defmodule GrafExTerm do
   charts, tables, stats and gauges.
 
   Dashboards are registered through `GrafExTerm.Dashboard.Store`, which
-  persists them and their per-dashboard settings to
-  `$XDG_CONFIG_HOME/graf_ex_term/dashboards.json`. The `:graf_ex_term`
+  persists them and their per-dashboard settings to `dashboards.json` under
+  `graf_ex_term/` in the `:store_dir` application environment value,
+  `$XDG_CONFIG_HOME` or `~/.config`. The `:graf_ex_term`
   application must be running before `run/1` is called; the supervision tree
   owns the store, the refresh caches and the per-dashboard workers.
 
@@ -21,10 +22,14 @@ defmodule GrafExTerm do
     * `:theme` — Drafter theme name. Defaults to `"tokyo-night"`.
     * `:height_ratio` — terminal rows per Grafana grid unit. Defaults to `3`.
     * `:time_range_seconds` — width of the query window. Defaults to `3600`.
-    * `:chart_resolution` — target sample count per series, which sets the
-      query step. Defaults to `300`.
+    * `:chart_resolution` — samples per series a panel is queried for until
+      the terminal width is known; after that the step is sized to the panel.
+      Defaults to `300`.
     * `:default_refresh_ms` — interval used when a dashboard declares no
       refresh. Defaults to `30_000`.
+
+  From a checkout, `mix graf_ex_term` starts the application and calls
+  `run/1`; `mix graf_ex_term.demo` does the same on generated data.
 
       GrafExTerm.run()
   """
