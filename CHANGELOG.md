@@ -13,6 +13,8 @@
 
 ### Changed
 
+- Charts are drawn as images on terminals with kitty, iTerm2 or sixel graphics, at the terminal's own pixel size per cell (the main screen and the viewer ask the terminal for it), and in braille elsewhere: `GRAF_EX_TERM_RENDERER` (`:chart_renderer`) defaults to `auto`. Set it to `braille` to draw braille everywhere. Heatmap, pie chart and gauge panels draw with the same setting (`GrafExTerm.Panel.Graphics.renderer/0`), so they are images too.
+- Bar timeseries panels show the hover and click readout.
 - Timeseries panels draw lines unless the panel fills them, as Grafana does by default: `fillOpacity` above 0 or `stacking.mode: "normal"` draws areas, `drawStyle: "points"` draws unjoined points, `drawStyle: "bars"` bars.
 - Timeseries series are placed on the query window's time grid: a series that starts late or stops early sits at its real time with gaps where it has no samples, instead of being stretched from the left edge. `custom.spanNulls` joins gaps (`true`, or a limit in milliseconds).
 - `GrafExTerm.Refresh.DataCache` entries carry each panel's query window (`:windows`); `GrafExTerm.Panel.Prepare.all/5`, `refilter/5` and `single/4` and `GrafExTerm.Panel.Timeseries.prepare/3` take them.

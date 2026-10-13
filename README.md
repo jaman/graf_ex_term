@@ -97,7 +97,7 @@ config :graf_ex_term,
 | `GRAF_EX_TERM_TIME_RANGE` | seconds of history shown, overriding the dashboard's own time range | the dashboard's `time`, else `3600` |
 | `GRAF_EX_TERM_CHART_RESOLUTION` | samples per panel before the terminal width is known | `300` |
 | `GRAF_EX_TERM_STAT_FONTS` | fonts for stat numbers, largest first, comma separated; the first that fits the panel is used. Built-in: `block`, `compact`, `tall`, `pixel`, `braille`; bundled FIGlet: `banner`, `big`, `blocks`, `bubble`, `digital`, `ivrit`, `lean`, `mini`, `script`, `shadow`, `slant`, `small`, `smscript`, `standard`, `term` | `braille,mini,compact` |
-| `GRAF_EX_TERM_RENDERER` | chart renderer: `text`, `braille`, `half`, `quad`, `sextant`, `octant`, `auto`, `pixel`, `kitty`, `iterm2`, `sixel` | Drafter's choice (`text`) |
+| `GRAF_EX_TERM_RENDERER` | chart renderer: `text`, `braille`, `half`, `quad`, `sextant`, `octant`, `auto`, `pixel`, `kitty`, `iterm2`, `sixel` | `auto` |
 
 `:max_concurrent_queries` (default `8`) and `:query_timeout_ms` (default `30000`) bound the scheduler's parallel panel queries.
 
@@ -143,7 +143,7 @@ Column visibility, widths, and column order are saved automatically and restored
 
 ### Charts
 
-Click a timeseries chart (or hover over it, in apps with hover enabled) to place a cursor: the column is highlighted and the title row shows the sample time and each series' value there. `Esc` hides it. With `GRAF_EX_TERM_RENDERER=auto` charts are drawn as images on terminals that support kitty, iTerm2 or sixel graphics, with the axes and title drawn as text around them.
+Click a timeseries chart (or hover over it, in apps with hover enabled) to place a cursor: the column is highlighted and a panel beside it lists the sample time and each series by name with its value, formatted for the panel's unit and sorted as the panel's tooltip is. `Esc` hides it. Charts are drawn as images on terminals that support kitty, iTerm2 or sixel graphics, at the terminal's own pixel size per cell, with the axes and title drawn as text around them; elsewhere they are drawn in braille. `GRAF_EX_TERM_RENDERER=braille` draws braille everywhere.
 
 ### Stat panels
 

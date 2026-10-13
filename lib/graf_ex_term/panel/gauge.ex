@@ -5,6 +5,8 @@ defmodule GrafExTerm.Panel.Gauge do
 
   import Drafter.App, only: [gauge: 1, horizontal: 2, placeholder: 1]
 
+  alias GrafExTerm.Panel.Graphics
+
   @doc """
   Builds the gauge widgets for `panel`.
 
@@ -36,7 +38,13 @@ defmodule GrafExTerm.Panel.Gauge do
 
         ratio = if max_val > 0, do: value / max_val, else: 0.0
 
-        gauge(value: ratio, label: label, flex: 1, height: 8)
+        gauge(
+          value: ratio,
+          label: label,
+          flex: 1,
+          height: 8,
+          renderer: Graphics.renderer()
+        )
       end)
 
     horizontal(gauges, gap: 1)

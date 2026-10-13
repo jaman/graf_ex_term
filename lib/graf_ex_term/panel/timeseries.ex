@@ -40,13 +40,13 @@ defmodule GrafExTerm.Panel.Timeseries do
   Each grid time becomes an x label, local `HH:MM:SS`. The chart's value
   readout lists every series by name with its value formatted for the panel's
   unit and decimals (`GrafExTerm.Format`), ordered by `options.tooltip.sort`.
-  The `:chart_renderer` application environment value, when set, is passed to
-  the chart as its `:renderer` (see `Drafter.Widget.Chart`).
+  Charts draw with `GrafExTerm.Panel.Graphics.renderer/0`.
   """
 
   import Drafter.App, only: [chart: 2, placeholder: 1]
 
   alias GrafExTerm.Format
+  alias GrafExTerm.Panel.Graphics
   alias GrafExTerm.Refresh.QueryWindow
 
   @palette [
@@ -191,12 +191,7 @@ defmodule GrafExTerm.Panel.Timeseries do
     Time.from_erl!(time)
   end
 
-  defp renderer_opts do
-    case Application.get_env(:graf_ex_term, :chart_renderer) do
-      nil -> []
-      renderer -> [renderer: renderer]
-    end
-  end
+  defp renderer_opts, do: [renderer: Graphics.renderer()]
 
   defp stacked?(custom), do: get_in(custom, ["stacking", "mode"]) == "normal"
 

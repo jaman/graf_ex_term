@@ -15,6 +15,8 @@ defmodule GrafExTerm.Panel.Heatmap do
 
   import Drafter.App, only: [chart: 2, placeholder: 1]
 
+  alias GrafExTerm.Panel.Graphics
+
   @doc """
   Converts fetched series into the heatmap matrix.
 
@@ -50,7 +52,8 @@ defmodule GrafExTerm.Panel.Heatmap do
     chart(matrix,
       id: :"heatmap_#{panel.id}",
       chart_type: :heatmap,
-      height: height
+      height: height,
+      renderer: Graphics.renderer()
     )
   end
 

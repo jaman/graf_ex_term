@@ -12,7 +12,7 @@ defmodule GrafExTerm.Panel.Piechart do
 
   import Drafter.App, only: [pie_chart: 2, placeholder: 1]
 
-  alias GrafExTerm.Panel.Reduce
+  alias GrafExTerm.Panel.{Graphics, Reduce}
 
   @doc """
   Builds the pie widget for `panel`.
@@ -46,7 +46,8 @@ defmodule GrafExTerm.Panel.Piechart do
       id: :"pie_#{panel.id}",
       height: height,
       show_legend: legend_visible?(legend),
-      show_percentages: "percent" in (Map.get(legend, "values") || [])
+      show_percentages: "percent" in (Map.get(legend, "values") || []),
+      renderer: Graphics.renderer()
     )
   end
 

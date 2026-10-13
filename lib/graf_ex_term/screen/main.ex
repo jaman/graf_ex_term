@@ -36,7 +36,7 @@ defmodule GrafExTerm.Screen.Main do
   opens with every row collapsed.
   """
 
-  use Drafter.App, mouse_hover: false
+  use Drafter.App, mouse_hover: false, cell_size: true
   import Drafter.App
 
   alias GrafExTerm.Dashboard.Store

@@ -24,7 +24,7 @@ defmodule GrafExTerm.Screen.Viewer do
   state; nothing here is persisted to `GrafExTerm.Dashboard.Store`.
   """
 
-  use Drafter.App
+  use Drafter.App, cell_size: true
 
   alias GrafExTerm.Layout.GridMapper
   alias GrafExTerm.Panel.Prepare
